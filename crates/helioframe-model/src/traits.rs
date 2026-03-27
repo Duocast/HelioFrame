@@ -1,6 +1,6 @@
 use helioframe_core::{BackendKind, Resolution};
 
-use crate::{backend::BackendCapabilities, plan::InferencePlan};
+use crate::{backend::BackendCapabilities, plan::InferencePlan, worker::WorkerAdapter};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BackendExecutionProfile {
@@ -28,5 +28,8 @@ pub trait InferenceBackend {
     fn build_plan(&self, target_resolution: Resolution) -> InferencePlan;
     fn execution_profile(&self) -> BackendExecutionProfile {
         BackendExecutionProfile::default()
+    }
+    fn worker_adapter(&self) -> WorkerAdapter {
+        WorkerAdapter::PythonProcess
     }
 }
