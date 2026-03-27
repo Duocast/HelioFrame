@@ -8,4 +8,5 @@ license.workspace = true
 helioframe-core = { path = "../helioframe-core" }
 helioframe-model = { path = "../helioframe-model" }
 helioframe-video = { path = "../helioframe-video" }
+serde.workspace = true
 serde_json.workspace = true
