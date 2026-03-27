@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helioframe.dev/schemas/python-worker/input-manifest-1.0.0.json",
+  "title": "HelioFrame Python Worker Input Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "clip_id",
+    "input_frames_dir",
+    "output_frames_dir",
+    "frames"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clip_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input_frames_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute or run-relative directory containing decoded source frames."
+    },
+    "output_frames_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory where worker writes processed frames."
+    },
+    "output_manifest_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional output path for the worker result manifest."
+    },
+    "frames": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "file_name"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
