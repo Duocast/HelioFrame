@@ -26,6 +26,7 @@ impl BackendRegistry {
             BackendKind::FastPreview => Box::new(FastPreview),
             BackendKind::SeedvrTeacher => Box::new(SeedvrTeacher),
             BackendKind::StcditStudio => Box::new(StcditStudio),
+            BackendKind::RealBasicVsrBridge => Box::new(RealBasicVsrBridge),
             BackendKind::HelioFrameMaster => Box::new(HelioFrameMaster),
         }
     }
@@ -35,6 +36,7 @@ struct ClassicalBaseline;
 struct FastPreview;
 struct SeedvrTeacher;
 struct StcditStudio;
+struct RealBasicVsrBridge;
 struct HelioFrameMaster;
 
 impl InferenceBackend for ClassicalBaseline {
@@ -72,6 +74,8 @@ impl InferenceBackend for ClassicalBaseline {
                 temporal_qc_gate: true,
                 teacher_guided: false,
                 custom_kernels_recommended: false,
+                temporal_window_inference: false,
+                bridge_backend_label: None,
             },
         }
     }
@@ -121,6 +125,8 @@ impl InferenceBackend for FastPreview {
                 temporal_qc_gate: false,
                 teacher_guided: false,
                 custom_kernels_recommended: true,
+                temporal_window_inference: false,
+                bridge_backend_label: None,
             },
         }
     }
@@ -161,6 +167,8 @@ impl InferenceBackend for SeedvrTeacher {
                 temporal_qc_gate: true,
                 teacher_guided: true,
                 custom_kernels_recommended: true,
+                temporal_window_inference: false,
+                bridge_backend_label: None,
             },
         }
     }
@@ -201,7 +209,60 @@ impl InferenceBackend for StcditStudio {
                 temporal_qc_gate: true,
                 teacher_guided: false,
                 custom_kernels_recommended: true,
+                temporal_window_inference: false,
+                bridge_backend_label: None,
             },
+        }
+    }
+}
+
+impl InferenceBackend for RealBasicVsrBridge {
+    fn kind(&self) -> BackendKind {
+        BackendKind::RealBasicVsrBridge
+    }
+
+    fn name(&self) -> &'static str {
+        "RealBasicVSR bridge"
+    }
+
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            real_world_restoration: true,
+            patch_wise_4k: false,
+            structural_guidance: false,
+            detail_refiner: false,
+            temporal_qc_gate: false,
+            teacher_guided: false,
+            multi_step_diffusion: false,
+            custom_cuda_recommended: true,
+        }
+    }
+
+    fn build_plan(&self, target_resolution: Resolution) -> InferencePlan {
+        InferencePlan {
+            backend: self.kind(),
+            target_resolution,
+            summary: "First practical bridge backend that routes temporal windows into the Python RealBasicVSR worker for end-to-end production validation.".into(),
+            hints: ExecutionHints {
+                patch_wise_4k: false,
+                multi_step_diffusion: false,
+                structural_guidance: false,
+                detail_refiner: false,
+                temporal_qc_gate: false,
+                teacher_guided: false,
+                custom_kernels_recommended: true,
+                temporal_window_inference: true,
+                bridge_backend_label: Some("realbasicvsr-bridge"),
+            },
+        }
+    }
+
+    fn execution_profile(&self) -> BackendExecutionProfile {
+        BackendExecutionProfile {
+            deterministic_output: false,
+            enable_mild_denoise: false,
+            resize_filter: "lanczos",
+            sharpen_amount: None,
         }
     }
 }
@@ -241,6 +302,8 @@ impl InferenceBackend for HelioFrameMaster {
                 temporal_qc_gate: true,
                 teacher_guided: true,
                 custom_kernels_recommended: true,
+                temporal_window_inference: false,
+                bridge_backend_label: None,
             },
         }
     }

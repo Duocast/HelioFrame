@@ -270,6 +270,7 @@ fn parse_backend(value: &str) -> anyhow::Result<BackendKind> {
         "fast-preview" => Ok(BackendKind::FastPreview),
         "seedvr-teacher" => Ok(BackendKind::SeedvrTeacher),
         "stcdit-studio" => Ok(BackendKind::StcditStudio),
+        "realbasicvsr-bridge" => Ok(BackendKind::RealBasicVsrBridge),
         "helioframe-master" => Ok(BackendKind::HelioFrameMaster),
         other => anyhow::bail!("unknown backend: {other}"),
     }
