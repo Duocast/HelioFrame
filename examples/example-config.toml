@@ -3,6 +3,7 @@ output = "output_4k.mp4"
 backend = "stcdit-studio"
 preset = "studio"
 
+# Strict validation: currently only 3840x2160 is accepted.
 [target_resolution]
 width = 3840
 height = 2160

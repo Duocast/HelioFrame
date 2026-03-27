@@ -21,6 +21,7 @@ pub struct PipelineOrchestrator;
 impl PipelineOrchestrator {
     pub fn plan(config: &AppConfig, preset: PresetConfig) -> HelioFrameResult<ExecutionPlan> {
         config.validate()?;
+        preset.validate_selection(config.preset, config.backend)?;
         let probe = probe_input(Path::new(&config.input))?;
         let backend = BackendRegistry::resolve(config.backend);
         let inference = backend.build_plan(config.target_resolution);
