@@ -15,6 +15,7 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
+use crate::tiling::build_window_tile_manifest;
 use crate::windows::build_windows_and_batches;
 
 #[derive(Debug, serde::Serialize)]
@@ -205,6 +206,7 @@ impl PipelineOrchestrator {
         let mut decoded_frames = None;
         let mut shot_detection = None;
         let mut temporal_windows = None;
+        let mut window_tiles = None;
 
         for stage in &plan.stages {
             match stage.name {
@@ -310,6 +312,30 @@ impl PipelineOrchestrator {
 
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
+                "tile" => {
+                    let started = Instant::now();
+                    let windows = temporal_windows.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "tile stage cannot run before window stage".to_string(),
+                        )
+                    })?;
+
+                    let tiles = build_window_tile_manifest(
+                        windows,
+                        plan.encode.output_resolution,
+                        plan.preset.tile_size,
+                        plan.preset.overlap,
+                    );
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "tiles.json",
+                        &tiles,
+                        "window tile manifest",
+                    )?;
+                    manifest.set_tiles(tiles.clone());
+                    window_tiles = Some(tiles);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
                 "encode" => {
                     let started = Instant::now();
                     let decoded = decoded_frames.as_ref().ok_or_else(|| {
@@ -345,6 +371,11 @@ impl PipelineOrchestrator {
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 _ => {
+                    if stage.name == "stitch" && window_tiles.is_none() {
+                        return Err(helioframe_core::HelioFrameError::Config(
+                            "stitch stage cannot run before tile stage".to_string(),
+                        ));
+                    }
                     manifest.append_stage_timing(stage.name, std::time::Duration::from_millis(0));
                 }
             }
@@ -367,8 +398,8 @@ mod tests {
             default_backend: BackendKind::StcditStudio,
             allowed_backends: vec![BackendKind::StcditStudio, BackendKind::SeedvrTeacher],
             temporal_window: 20,
-            tile_size: 1024,
-            overlap: 96,
+            tile_size: 512,
+            overlap: 64,
             diffusion_steps: 16,
             use_half_precision: true,
             enable_patchwise_4k: true,
@@ -422,6 +453,8 @@ mod tests {
         assert!(!manifest.windows.is_empty());
         assert_eq!(manifest.windows[0].start_frame, 0);
         assert!(!manifest.windows[0].anchor_frames.is_empty());
+        assert_eq!(manifest.tiles.len(), manifest.windows.len());
+        assert!(!manifest.tiles[0].tiles.is_empty());
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
@@ -446,6 +479,11 @@ mod tests {
             .run_layout
             .intermediate_artifacts_dir
             .join("window_batches.json")
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("tiles.json")
             .exists());
 
         let windows_raw = std::fs::read_to_string(

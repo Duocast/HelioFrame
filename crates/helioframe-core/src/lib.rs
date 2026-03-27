@@ -9,6 +9,6 @@ pub use error::{HelioFrameError, HelioFrameResult};
 pub use manifest::{RunLayout, RunManifest, RunProbeInfo, StageTiming};
 pub use system::{run_doctor, DoctorCheck, DoctorSummary};
 pub use types::{
-    BackendKind, Resolution, SceneBoundary, TemporalWindow, UpscalePreset, VideoContainer,
-    WindowedClipBatch,
+    BackendKind, Resolution, SceneBoundary, SpatialTile, TemporalWindow, UpscalePreset,
+    VideoContainer, WindowTileManifest, WindowedClipBatch,
 };
