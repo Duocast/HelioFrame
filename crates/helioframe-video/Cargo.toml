@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 helioframe-core = { path = "../helioframe-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

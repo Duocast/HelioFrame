@@ -187,8 +187,14 @@ mod tests {
                 .as_nanos()
         ));
 
+        if !ffmpeg_available() || !ffprobe_available() {
+            eprintln!("skipping orchestrator manifest test because ffmpeg/ffprobe are unavailable");
+            return;
+        }
+
+        let input = create_fixture_clip(&temp);
         let config = AppConfig {
-            input: "input.mp4".into(),
+            input: input.to_string_lossy().to_string(),
             output: "output.mp4".into(),
             backend: BackendKind::StcditStudio,
             preset: UpscalePreset::Studio,
@@ -206,10 +212,58 @@ mod tests {
         let manifest: RunManifest =
             serde_json::from_str(&raw_manifest).expect("manifest should parse as json");
 
-        assert_eq!(manifest.input, "input.mp4");
+        assert_eq!(manifest.input, input.to_string_lossy());
         assert_eq!(manifest.output, "output.mp4");
         assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
 
         std::fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
+    }
+    fn ffmpeg_available() -> bool {
+        std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn ffprobe_available() -> bool {
+        std::process::Command::new("ffprobe")
+            .arg("-version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn create_fixture_clip(base: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(base).expect("temp fixture directory should be creatable");
+        let path = base.join("input.mp4");
+        let output = std::process::Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-f")
+            .arg("lavfi")
+            .arg("-i")
+            .arg("testsrc=size=320x180:rate=24:duration=1")
+            .arg("-pix_fmt")
+            .arg("yuv420p")
+            .arg("-f")
+            .arg("lavfi")
+            .arg("-i")
+            .arg("anullsrc=r=48000:cl=stereo")
+            .arg("-shortest")
+            .arg("-c:v")
+            .arg("libx264")
+            .arg("-c:a")
+            .arg("aac")
+            .arg(&path)
+            .output()
+            .expect("ffmpeg should run");
+
+        assert!(
+            output.status.success(),
+            "ffmpeg fixture generation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        path
     }
 }

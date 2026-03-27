@@ -183,6 +183,8 @@ name = "helioframe-video"
 version = "0.1.0"
 dependencies = [
  "helioframe-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
