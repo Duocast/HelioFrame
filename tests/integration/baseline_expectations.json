@@ -1,0 +1,10 @@
+{
+  "roundtrip": {
+    "container": "mp4",
+    "pixel_format": "yuv420p",
+    "min_duration_seconds": 0.45,
+    "max_duration_seconds": 1.1,
+    "max_frame_delta": 1,
+    "fps_tolerance": 0.2
+  }
+}

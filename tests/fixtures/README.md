@@ -1,8 +1,12 @@
 # Test video fixtures
 
-This directory stores (or is used to generate) sample media for probe tests.
+Fixtures are generated on demand from deterministic recipes in
+`clip_recipes.json` and stored under `tests/fixtures/clips/`.
 
-- `probe-sample-with-audio.mp4` is generated on demand by
-  `crates/helioframe-video/src/probe.rs` tests using `ffmpeg`.
-- The file is intentionally generated in test setup so we avoid committing large
-  binary artifacts while still validating real `ffprobe` JSON metadata parsing.
+Why generated instead of committed binaries:
+
+- keeps repository size small,
+- makes fixture generation deterministic and auditable,
+- still exercises real `ffprobe`, decode, and encode code paths.
+
+Current recipe set: 6 clips spanning mp4/mov/mkv/avi/m4v with and without audio.
