@@ -11,5 +11,5 @@ enable_structural_guidance = false
 enable_detail_refiner = false
 enable_temporal_consistency_checks = true
 reject_on_temporal_regression = false
-anchor_frame_stride = 0
+anchor_frame_stride = 4
 notes = "Conservative path for reliable output and easier early deployment."

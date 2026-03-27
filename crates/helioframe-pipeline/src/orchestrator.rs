@@ -15,6 +15,7 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
+use crate::windows::build_windows_and_batches;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionPlan {
@@ -80,14 +81,14 @@ impl PipelineOrchestrator {
                         "Detect scene boundaries so motion and guidance state do not leak across cuts.",
                 },
                 PipelineStage {
-                    name: "anchors",
-                    description:
-                        "Select anchor frames and guidance frames for structure-sensitive restoration.",
-                },
-                PipelineStage {
                     name: "window",
                     description:
                         "Build temporal windows sized for high-quality restoration rather than maximum throughput.",
+                },
+                PipelineStage {
+                    name: "anchors",
+                    description:
+                        "Select anchor frames and guidance frames for structure-sensitive restoration.",
                 },
                 PipelineStage {
                     name: "tile",
@@ -168,6 +169,7 @@ impl PipelineOrchestrator {
 
         let mut decoded_frames = None;
         let mut shot_detection = None;
+        let mut temporal_windows = None;
 
         for stage in &plan.stages {
             match stage.name {
@@ -189,12 +191,8 @@ impl PipelineOrchestrator {
                         )
                     })?;
 
-                    let detections = detect_shots(
-                        Path::new(&config.input),
-                        decoded,
-                        DEFAULT_SCDET_THRESHOLD,
-                        plan.preset.temporal_window,
-                    )?;
+                    let detections =
+                        detect_shots(Path::new(&config.input), decoded, DEFAULT_SCDET_THRESHOLD)?;
 
                     let artifact_path = run_layout.intermediate_artifacts_dir.join("shots.json");
                     let artifact_json =
@@ -220,21 +218,72 @@ impl PipelineOrchestrator {
                             "window stage cannot run before shots stage".to_string(),
                         )
                     })?;
+                    let (windows, batches) = build_windows_and_batches(
+                        detections.frame_count,
+                        &detections.boundaries,
+                        plan.preset.temporal_window,
+                        plan.preset.anchor_frame_stride,
+                    );
                     let artifact_path = run_layout
                         .intermediate_artifacts_dir
-                        .join("temporal_windows.json");
-                    let windows_json =
-                        serde_json::to_string_pretty(&detections.windows).map_err(|err| {
-                            helioframe_core::HelioFrameError::Config(format!(
-                                "failed to serialize temporal windows artifact: {err}"
-                            ))
-                        })?;
+                        .join("windows.json");
+                    let windows_json = serde_json::to_string_pretty(&windows).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to serialize temporal windows artifact: {err}"
+                        ))
+                    })?;
                     fs::write(&artifact_path, windows_json).map_err(|err| {
                         helioframe_core::HelioFrameError::Config(format!(
                             "failed to write temporal windows artifact {}: {err}",
                             artifact_path.display()
                         ))
                     })?;
+
+                    let batches_path = run_layout
+                        .intermediate_artifacts_dir
+                        .join("window_batches.json");
+                    let batches_json = serde_json::to_string_pretty(&batches).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to serialize temporal window batches artifact: {err}"
+                        ))
+                    })?;
+                    fs::write(&batches_path, batches_json).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to write temporal window batches artifact {}: {err}",
+                            batches_path.display()
+                        ))
+                    })?;
+
+                    temporal_windows = Some(windows.clone());
+                    manifest.set_windows(windows);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "anchors" => {
+                    let started = Instant::now();
+                    let windows = temporal_windows.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "anchors stage cannot run before window stage".to_string(),
+                        )
+                    })?;
+                    let anchors_path = run_layout
+                        .intermediate_artifacts_dir
+                        .join("anchors.json");
+                    let anchors: Vec<Vec<usize>> = windows
+                        .iter()
+                        .map(|window| window.anchor_frames.clone())
+                        .collect();
+                    let anchors_json = serde_json::to_string_pretty(&anchors).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to serialize anchor frame artifact: {err}"
+                        ))
+                    })?;
+                    fs::write(&anchors_path, anchors_json).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to write anchor frame artifact {}: {err}",
+                            anchors_path.display()
+                        ))
+                    })?;
+
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "encode" => {
@@ -346,6 +395,9 @@ mod tests {
         assert_eq!(manifest.input, input.to_string_lossy());
         assert_eq!(manifest.output, "output.mp4");
         assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
+        assert!(!manifest.windows.is_empty());
+        assert_eq!(manifest.windows[0].start_frame, 0);
+        assert!(!manifest.windows[0].anchor_frames.is_empty());
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
@@ -354,20 +406,31 @@ mod tests {
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
-            .join("temporal_windows.json")
+            .join("windows.json")
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("anchors.json")
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("window_batches.json")
             .exists());
 
         let windows_raw = std::fs::read_to_string(
             execution
                 .run_layout
                 .intermediate_artifacts_dir
-                .join("temporal_windows.json"),
+                .join("windows.json"),
         )
         .expect("window artifact should be readable");
-        let windows: Vec<crate::stages::TemporalWindow> =
+        let windows: Vec<helioframe_core::TemporalWindow> =
             serde_json::from_str(&windows_raw).expect("window artifact should parse as json");
         assert!(!windows.is_empty());
         assert_eq!(windows[0].start_frame, 0);
+        assert!(!windows[0].anchor_frames.is_empty());
 
         std::fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
     }
