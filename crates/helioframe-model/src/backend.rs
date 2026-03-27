@@ -2,7 +2,7 @@ use helioframe_core::{BackendKind, Resolution};
 
 use crate::{
     plan::{ExecutionHints, InferencePlan},
-    traits::InferenceBackend,
+    traits::{BackendExecutionProfile, InferenceBackend},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +73,15 @@ impl InferenceBackend for ClassicalBaseline {
                 teacher_guided: false,
                 custom_kernels_recommended: false,
             },
+        }
+    }
+
+    fn execution_profile(&self) -> BackendExecutionProfile {
+        BackendExecutionProfile {
+            deterministic_output: true,
+            enable_mild_denoise: false,
+            resize_filter: "lanczos",
+            sharpen_amount: None,
         }
     }
 }
