@@ -1,0 +1,12 @@
+{
+  "stitch": {
+    "frame_width": 96,
+    "frame_height": 64,
+    "channels": 3,
+    "tile_width": 56,
+    "tile_height": 40,
+    "overlap": 16,
+    "max_mean_abs_error": 4.0,
+    "max_seam_delta": 8.0
+  }
+}
