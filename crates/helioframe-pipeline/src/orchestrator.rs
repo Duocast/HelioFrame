@@ -15,7 +15,11 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
+use crate::tiling::build_window_tile_manifests;
 use crate::windows::build_windows_and_batches;
+
+const WINDOWS_ARTIFACT_FILENAME: &str = "windows.json";
+const ANCHORS_ARTIFACT_FILENAME: &str = "anchors.json";
 
 #[derive(Debug, serde::Serialize)]
 struct ProbeArtifact {
@@ -275,7 +279,7 @@ impl PipelineOrchestrator {
                     );
                     Self::write_stage_artifact(
                         &run_layout,
-                        "windows.json",
+                        WINDOWS_ARTIFACT_FILENAME,
                         &windows,
                         "temporal windows",
                     )?;
@@ -303,11 +307,34 @@ impl PipelineOrchestrator {
                         .collect();
                     Self::write_stage_artifact(
                         &run_layout,
-                        "anchors.json",
+                        ANCHORS_ARTIFACT_FILENAME,
                         &anchors,
                         "anchor frame",
                     )?;
 
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "tile" => {
+                    let started = Instant::now();
+                    let windows = temporal_windows.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "tile stage cannot run before window stage".to_string(),
+                        )
+                    })?;
+                    let tile_manifests = build_window_tile_manifests(
+                        windows,
+                        config.target_resolution.width as usize,
+                        config.target_resolution.height as usize,
+                        plan.preset.tile_size,
+                        plan.preset.overlap,
+                    );
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "tile_manifest.json",
+                        &tile_manifests,
+                        "tile manifest",
+                    )?;
+                    manifest.set_window_tiles(tile_manifests);
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "encode" => {
@@ -420,8 +447,10 @@ mod tests {
         assert_eq!(manifest.output, "output.mp4");
         assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
         assert!(!manifest.windows.is_empty());
+        assert!(!manifest.window_tiles.is_empty());
         assert_eq!(manifest.windows[0].start_frame, 0);
         assert!(!manifest.windows[0].anchor_frames.is_empty());
+        assert!(!manifest.window_tiles[0].tiles.is_empty());
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
@@ -435,12 +464,17 @@ mod tests {
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
-            .join("windows.json")
+            .join(WINDOWS_ARTIFACT_FILENAME)
             .exists());
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
-            .join("anchors.json")
+            .join(ANCHORS_ARTIFACT_FILENAME)
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("tile_manifest.json")
             .exists());
         assert!(execution
             .run_layout
@@ -452,7 +486,7 @@ mod tests {
             execution
                 .run_layout
                 .intermediate_artifacts_dir
-                .join("windows.json"),
+                .join(WINDOWS_ARTIFACT_FILENAME),
         )
         .expect("window artifact should be readable");
         let windows: Vec<helioframe_core::TemporalWindow> =

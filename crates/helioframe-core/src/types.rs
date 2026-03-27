@@ -23,6 +23,24 @@ pub struct WindowedClipBatch {
     pub anchor_frames: Vec<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TileCoordinate {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WindowTileManifest {
+    pub window_index: usize,
+    pub start_frame: usize,
+    pub end_frame_exclusive: usize,
+    pub tile_size: usize,
+    pub overlap: usize,
+    pub tiles: Vec<TileCoordinate>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Resolution {
     pub width: u32,

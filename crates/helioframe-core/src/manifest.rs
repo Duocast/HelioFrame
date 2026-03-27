@@ -1,5 +1,6 @@
 use crate::{
     AppConfig, BackendKind, HelioFrameError, HelioFrameResult, TemporalWindow, UpscalePreset,
+    WindowTileManifest,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +30,7 @@ pub struct RunManifest {
     pub backend: BackendKind,
     pub probe: RunProbeInfo,
     pub windows: Vec<TemporalWindow>,
+    pub window_tiles: Vec<WindowTileManifest>,
     pub stage_timings: Vec<StageTiming>,
 }
 
@@ -42,6 +44,7 @@ impl RunManifest {
             backend: config.backend,
             probe,
             windows: Vec::new(),
+            window_tiles: Vec::new(),
             stage_timings: vec![StageTiming {
                 stage: "preset".into(),
                 elapsed_ms: 0,
@@ -51,6 +54,10 @@ impl RunManifest {
 
     pub fn set_windows(&mut self, windows: Vec<TemporalWindow>) {
         self.windows = windows;
+    }
+
+    pub fn set_window_tiles(&mut self, window_tiles: Vec<WindowTileManifest>) {
+        self.window_tiles = window_tiles;
     }
 
     pub fn append_stage_timing(&mut self, stage: impl Into<String>, elapsed: Duration) {
