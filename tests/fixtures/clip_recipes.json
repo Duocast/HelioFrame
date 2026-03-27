@@ -1,0 +1,74 @@
+[
+  {
+    "name": "tiny_mp4_silent_12f",
+    "file": "tiny_mp4_silent_12f.mp4",
+    "container": "mp4",
+    "width": 96,
+    "height": 54,
+    "fps": 24,
+    "duration_seconds": 0.5,
+    "expected_frames": 12,
+    "has_audio": false,
+    "video_filter": "testsrc"
+  },
+  {
+    "name": "tiny_mp4_audio_15f",
+    "file": "tiny_mp4_audio_15f.mp4",
+    "container": "mp4",
+    "width": 120,
+    "height": 68,
+    "fps": 30,
+    "duration_seconds": 0.5,
+    "expected_frames": 15,
+    "has_audio": true,
+    "video_filter": "testsrc2"
+  },
+  {
+    "name": "tiny_mov_audio_16f",
+    "file": "tiny_mov_audio_16f.mov",
+    "container": "mov",
+    "width": 128,
+    "height": 72,
+    "fps": 16,
+    "duration_seconds": 1.0,
+    "expected_frames": 16,
+    "has_audio": true,
+    "video_filter": "smptebars"
+  },
+  {
+    "name": "tiny_mkv_silent_20f",
+    "file": "tiny_mkv_silent_20f.mkv",
+    "container": "mkv",
+    "width": 100,
+    "height": 76,
+    "fps": 20,
+    "duration_seconds": 1.0,
+    "expected_frames": 20,
+    "has_audio": false,
+    "video_filter": "testsrc"
+  },
+  {
+    "name": "tiny_avi_audio_10f",
+    "file": "tiny_avi_audio_10f.avi",
+    "container": "avi",
+    "width": 112,
+    "height": 64,
+    "fps": 10,
+    "duration_seconds": 1.0,
+    "expected_frames": 10,
+    "has_audio": true,
+    "video_filter": "testsrc2"
+  },
+  {
+    "name": "tiny_m4v_silent_18f",
+    "file": "tiny_m4v_silent_18f.m4v",
+    "container": "m4v",
+    "width": 108,
+    "height": 60,
+    "fps": 18,
+    "duration_seconds": 1.0,
+    "expected_frames": 18,
+    "has_audio": false,
+    "video_filter": "smptebars"
+  }
+]

@@ -1,11 +1,10 @@
-//! Integration coverage notes for ffprobe-backed probing.
+//! Integration coverage is implemented in crate-local tests at
+//! `crates/helioframe-video/tests/io_regression.rs`.
 //!
-//! This workspace uses a virtual manifest at the repository root, so executable
-//! Rust integration tests live in crate-local `tests/` folders. The canonical
-//! exercised probe coverage is in `crates/helioframe-video/src/probe.rs` tests,
-//! which generate sample clips in `tests/fixtures/` and validate parsed metadata.
+//! This workspace root uses a virtual manifest, so runnable Rust integration
+//! tests must live inside crate directories.
 
 #[test]
-fn probe_integration_coverage_is_crate_local() {
-    assert!(true, "see crate-local tests in helioframe-video");
+fn integration_probe_regression_is_crate_local() {
+    assert!(true);
 }
