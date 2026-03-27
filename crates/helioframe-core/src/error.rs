@@ -20,4 +20,6 @@ pub enum HelioFrameError {
     PresetNameMismatch { expected: String, actual: String },
     #[error("configuration error: {0}")]
     Config(String),
+    #[error("run manifest error: {0}")]
+    RunManifest(String),
 }

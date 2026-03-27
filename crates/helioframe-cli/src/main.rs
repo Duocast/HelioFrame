@@ -140,7 +140,8 @@ fn run_upscale(
         target_resolution: Resolution { width, height },
     };
 
-    let plan = PipelineOrchestrator::plan(&config, preset_cfg)?;
+    let execution = PipelineOrchestrator::execute(&config, preset_cfg)?;
+    let plan = &execution.plan;
 
     info!("HelioFrame execution plan");
     println!("Input:   {}", config.input);
@@ -229,6 +230,10 @@ fn run_upscale(
         "- custom kernels advised:   {}",
         plan.inference.hints.custom_kernels_recommended
     );
+    println!();
+    println!("Run ID: {}", execution.run_layout.run_id);
+    println!("Run directory: {}", execution.run_layout.run_dir.display());
+    println!("Manifest: {}", execution.run_layout.manifest_path.display());
 
     Ok(())
 }
