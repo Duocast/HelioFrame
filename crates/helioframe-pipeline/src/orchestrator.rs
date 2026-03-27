@@ -17,6 +17,18 @@ use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
 use crate::windows::build_windows_and_batches;
 
+#[derive(Debug, serde::Serialize)]
+struct ProbeArtifact {
+    container: String,
+    assumed_resolution: String,
+    fps: f64,
+    duration_seconds: f64,
+    video_codec: String,
+    has_audio: bool,
+    pixel_format: Option<String>,
+    colorspace: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecutionPlan {
     pub probe: VideoProbe,
@@ -36,6 +48,29 @@ pub struct RunExecution {
 pub struct PipelineOrchestrator;
 
 impl PipelineOrchestrator {
+    fn write_stage_artifact<T: serde::Serialize>(
+        run_layout: &RunLayout,
+        filename: &str,
+        value: &T,
+        artifact_label: &str,
+    ) -> HelioFrameResult<()> {
+        let artifact_path = run_layout.intermediate_artifacts_dir.join(filename);
+        let artifact_json = serde_json::to_string_pretty(value).map_err(|err| {
+            helioframe_core::HelioFrameError::Config(format!(
+                "failed to serialize {artifact_label} artifact: {err}"
+            ))
+        })?;
+
+        fs::write(&artifact_path, artifact_json).map_err(|err| {
+            helioframe_core::HelioFrameError::Config(format!(
+                "failed to write {artifact_label} artifact {}: {err}",
+                artifact_path.display()
+            ))
+        })?;
+
+        Ok(())
+    }
+
     pub fn plan(config: &AppConfig, preset: PresetConfig) -> HelioFrameResult<ExecutionPlan> {
         config.validate()?;
         preset.validate_selection(config.preset, config.backend)?;
@@ -173,6 +208,27 @@ impl PipelineOrchestrator {
 
         for stage in &plan.stages {
             match stage.name {
+                "probe" => {
+                    let started = Instant::now();
+                    let probe = &plan.probe;
+                    let probe_artifact = ProbeArtifact {
+                        container: probe.container.to_string(),
+                        assumed_resolution: probe.assumed_resolution.to_string(),
+                        fps: probe.fps,
+                        duration_seconds: probe.duration_seconds,
+                        video_codec: probe.video_codec.clone(),
+                        has_audio: probe.has_audio,
+                        pixel_format: probe.pixel_format.clone(),
+                        colorspace: probe.colorspace.clone(),
+                    };
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "probe.json",
+                        &probe_artifact,
+                        "probe",
+                    )?;
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
                 "decode" => {
                     let started = Instant::now();
                     let decode_dir = run_layout.intermediate_artifacts_dir.join("decoded");
@@ -194,19 +250,12 @@ impl PipelineOrchestrator {
                     let detections =
                         detect_shots(Path::new(&config.input), decoded, DEFAULT_SCDET_THRESHOLD)?;
 
-                    let artifact_path = run_layout.intermediate_artifacts_dir.join("shots.json");
-                    let artifact_json =
-                        serde_json::to_string_pretty(&detections).map_err(|err| {
-                            helioframe_core::HelioFrameError::Config(format!(
-                                "failed to serialize shot detection artifact: {err}"
-                            ))
-                        })?;
-                    fs::write(&artifact_path, artifact_json).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to write shot detection artifact {}: {err}",
-                            artifact_path.display()
-                        ))
-                    })?;
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "shots.json",
+                        &detections,
+                        "shot detection",
+                    )?;
 
                     shot_detection = Some(detections);
                     manifest.append_stage_timing(stage.name, started.elapsed());
@@ -224,35 +273,18 @@ impl PipelineOrchestrator {
                         plan.preset.temporal_window,
                         plan.preset.anchor_frame_stride,
                     );
-                    let artifact_path = run_layout
-                        .intermediate_artifacts_dir
-                        .join("windows.json");
-                    let windows_json = serde_json::to_string_pretty(&windows).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to serialize temporal windows artifact: {err}"
-                        ))
-                    })?;
-                    fs::write(&artifact_path, windows_json).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to write temporal windows artifact {}: {err}",
-                            artifact_path.display()
-                        ))
-                    })?;
-
-                    let batches_path = run_layout
-                        .intermediate_artifacts_dir
-                        .join("window_batches.json");
-                    let batches_json = serde_json::to_string_pretty(&batches).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to serialize temporal window batches artifact: {err}"
-                        ))
-                    })?;
-                    fs::write(&batches_path, batches_json).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to write temporal window batches artifact {}: {err}",
-                            batches_path.display()
-                        ))
-                    })?;
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "windows.json",
+                        &windows,
+                        "temporal windows",
+                    )?;
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "window_batches.json",
+                        &batches,
+                        "temporal window batches",
+                    )?;
 
                     temporal_windows = Some(windows.clone());
                     manifest.set_windows(windows);
@@ -265,24 +297,16 @@ impl PipelineOrchestrator {
                             "anchors stage cannot run before window stage".to_string(),
                         )
                     })?;
-                    let anchors_path = run_layout
-                        .intermediate_artifacts_dir
-                        .join("anchors.json");
                     let anchors: Vec<Vec<usize>> = windows
                         .iter()
                         .map(|window| window.anchor_frames.clone())
                         .collect();
-                    let anchors_json = serde_json::to_string_pretty(&anchors).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to serialize anchor frame artifact: {err}"
-                        ))
-                    })?;
-                    fs::write(&anchors_path, anchors_json).map_err(|err| {
-                        helioframe_core::HelioFrameError::Config(format!(
-                            "failed to write anchor frame artifact {}: {err}",
-                            anchors_path.display()
-                        ))
-                    })?;
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        "anchors.json",
+                        &anchors,
+                        "anchor frame",
+                    )?;
 
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
@@ -398,6 +422,11 @@ mod tests {
         assert!(!manifest.windows.is_empty());
         assert_eq!(manifest.windows[0].start_frame, 0);
         assert!(!manifest.windows[0].anchor_frames.is_empty());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("probe.json")
+            .exists());
         assert!(execution
             .run_layout
             .intermediate_artifacts_dir
