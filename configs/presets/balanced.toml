@@ -1,1 +1,14 @@
-
+name = "balanced"
+default_backend = "classical-baseline"
+temporal_window = 12
+tile_size = 640
+overlap = 48
+diffusion_steps = 0
+use_half_precision = true
+enable_patchwise_4k = true
+enable_structural_guidance = false
+enable_detail_refiner = false
+enable_temporal_consistency_checks = true
+reject_on_temporal_regression = false
+anchor_frame_stride = 0
+notes = "Conservative path for reliable output and easier early deployment."

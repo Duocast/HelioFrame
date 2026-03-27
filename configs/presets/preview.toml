@@ -1,1 +1,14 @@
-
+name = "preview"
+default_backend = "fast-preview"
+temporal_window = 8
+tile_size = 512
+overlap = 32
+diffusion_steps = 1
+use_half_precision = true
+enable_patchwise_4k = true
+enable_structural_guidance = false
+enable_detail_refiner = false
+enable_temporal_consistency_checks = false
+reject_on_temporal_regression = false
+anchor_frame_stride = 0
+notes = "Fast approximate output for quick look review, not final delivery."

@@ -28,7 +28,7 @@ The repository now assumes a **backend ladder** with a clear quality hierarchy:
 4. `stcdit-studio`  
    Default studio backend. Quality-first, structure-guided, patch-wise 4K capable, and strict about temporal coherence.
 
-5. `HelioFrame-master`  
+5. `helioframe-master`  
    Experimental flagship backend combining teacher guidance, patch-wise 4K synthesis, detail refinement, and temporal QC gating.
 
 ## Quality-first pipeline goals
@@ -44,17 +44,17 @@ The primary pipeline is designed around:
 ## Workspace layout
 
 ```text
-HelioFrame-vsr/
+helioframe/
 ├── Cargo.toml
 ├── README.md
 ├── configs/
 │   └── presets/
 ├── crates/
-│   ├── HelioFrame-cli/
-│   ├── HelioFrame-core/
-│   ├── HelioFrame-model/
-│   ├── HelioFrame-pipeline/
-│   └── HelioFrame-video/
+│   ├── helioframe-cli/
+│   ├── helioframe-core/
+│   ├── helioframe-model/
+│   ├── helioframe-pipeline/
+│   └── helioframe-video/
 ├── docs/
 ├── examples/
 ├── models/
@@ -67,7 +67,7 @@ HelioFrame-vsr/
 Default run: quality-first studio path.
 
 ```bash
-cargo run -p HelioFrame-cli -- \
+cargo run -p helioframe-cli -- \
   upscale input.mp4 \
   --output output_4k.mp4
 ```
@@ -75,7 +75,7 @@ cargo run -p HelioFrame-cli -- \
 Explicit studio run:
 
 ```bash
-cargo run -p HelioFrame-cli -- \
+cargo run -p helioframe-cli -- \
   upscale input.mp4 \
   --output output_4k.mp4 \
   --preset studio \
@@ -85,11 +85,11 @@ cargo run -p HelioFrame-cli -- \
 Experimental maximum-quality run:
 
 ```bash
-cargo run -p HelioFrame-cli -- \
+cargo run -p helioframe-cli -- \
   upscale input.mp4 \
   --output output_4k.mp4 \
   --preset experimental \
-  --backend HelioFrame-master
+  --backend helioframe-master
 ```
 
 ## Current status

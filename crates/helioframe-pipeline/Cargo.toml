@@ -1,9 +1,10 @@
 [package]
-name = "helioframe-model"
+name = "helioframe-pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 helioframe-core = { path = "../helioframe-core" }
-serde.workspace = true
+helioframe-model = { path = "../helioframe-model" }
+helioframe-video = { path = "../helioframe-video" }

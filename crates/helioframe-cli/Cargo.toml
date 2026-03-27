@@ -1,1 +1,13 @@
+[package]
+name = "helioframe-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
+[dependencies]
+anyhow.workspace = true
+helioframe-core = { path = "../helioframe-core" }
+helioframe-pipeline = { path = "../helioframe-pipeline" }
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

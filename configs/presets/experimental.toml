@@ -1,1 +1,14 @@
-
+name = "experimental"
+default_backend = "helioframe-master"
+temporal_window = 24
+tile_size = 1024
+overlap = 128
+diffusion_steps = 24
+use_half_precision = true
+enable_patchwise_4k = true
+enable_structural_guidance = true
+enable_detail_refiner = true
+enable_temporal_consistency_checks = true
+reject_on_temporal_regression = true
+anchor_frame_stride = 3
+notes = "Maximum-quality research path with heavier teacher guidance and stricter temporal rejection."

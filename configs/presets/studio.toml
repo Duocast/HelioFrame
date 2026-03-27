@@ -1,1 +1,14 @@
-
+name = "studio"
+default_backend = "stcdit-studio"
+temporal_window = 20
+tile_size = 1024
+overlap = 96
+diffusion_steps = 16
+use_half_precision = true
+enable_patchwise_4k = true
+enable_structural_guidance = true
+enable_detail_refiner = true
+enable_temporal_consistency_checks = true
+reject_on_temporal_regression = true
+anchor_frame_stride = 4
+notes = "Primary quality-first preset for final 4K delivery."

@@ -1,1 +1,8 @@
+input = "input.mp4"
+output = "output_4k.mp4"
+backend = "stcdit-studio"
+preset = "studio"
 
+[target_resolution]
+width = 3840
+height = 2160
