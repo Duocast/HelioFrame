@@ -1,6 +1,28 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::Path};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SceneBoundary {
+    pub frame_index: usize,
+    pub timestamp_seconds: f64,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TemporalWindow {
+    pub start_frame: usize,
+    pub end_frame_exclusive: usize,
+    pub anchor_frames: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WindowedClipBatch {
+    pub window_index: usize,
+    pub start_frame: usize,
+    pub end_frame_exclusive: usize,
+    pub anchor_frames: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Resolution {
     pub width: u32,
