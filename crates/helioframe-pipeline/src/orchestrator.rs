@@ -58,7 +58,8 @@ impl PipelineOrchestrator {
 
         stages.push(PipelineStage {
             name: "restore",
-            description: "Run the primary restoration backend over each temporal window and patch batch.",
+            description:
+                "Run the primary restoration backend over each temporal window and patch batch.",
         });
 
         if preset.enable_detail_refiner || inference.hints.detail_refiner {
@@ -78,7 +79,8 @@ impl PipelineOrchestrator {
         stages.extend([
             PipelineStage {
                 name: "stitch",
-                description: "Blend overlaps, reconstruct full frames, and remove tile boundary artifacts.",
+                description:
+                    "Blend overlaps, reconstruct full frames, and remove tile boundary artifacts.",
             },
             PipelineStage {
                 name: "encode",

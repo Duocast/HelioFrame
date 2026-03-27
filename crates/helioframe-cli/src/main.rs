@@ -1,9 +1,11 @@
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use anyhow::Context;
-use helioframe_core::{AppConfig, BackendKind, PresetConfig, Resolution, UpscalePreset};
-use helioframe_pipeline::PipelineOrchestrator;
 use clap::{Parser, Subcommand};
+use helioframe_core::{
+    run_doctor, AppConfig, BackendKind, DoctorSummary, PresetConfig, Resolution, UpscalePreset,
+};
+use helioframe_pipeline::PipelineOrchestrator;
 use tracing::info;
 
 #[derive(Debug, Parser)]
@@ -29,6 +31,7 @@ enum Commands {
         #[arg(long, default_value_t = 2160)]
         height: u32,
     },
+    Doctor,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -48,7 +51,59 @@ fn main() -> anyhow::Result<()> {
             width,
             height,
         } => run_upscale(input, output, preset, backend, width, height),
+        Commands::Doctor => run_doctor_command(),
     }
+}
+
+fn run_doctor_command() -> anyhow::Result<()> {
+    let report = run_doctor();
+    print_human_readable_report(&report);
+    print_json_report(&report)?;
+
+    if report.is_ok() {
+        Ok(())
+    } else {
+        let failed = report
+            .failed_checks()
+            .into_iter()
+            .map(|check| check.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::bail!("doctor failed: missing or invalid dependencies ({failed})")
+    }
+}
+
+fn print_human_readable_report(report: &DoctorSummary) {
+    println!("HelioFrame doctor report");
+    println!("Platform support: {}", report.platform_notice);
+    println!();
+
+    for check in &report.checks {
+        let status = if check.passed { "PASS" } else { "FAIL" };
+        println!("[{status}] {}", check.name);
+        println!("  detail: {}", check.detail);
+        if let Some(action) = &check.action {
+            println!("  action: {action}");
+        }
+    }
+
+    println!();
+    println!(
+        "Overall: {}",
+        if report.is_ok() {
+            "PASS"
+        } else {
+            "FAIL (action required)"
+        }
+    );
+    println!();
+}
+
+fn print_json_report(report: &DoctorSummary) -> anyhow::Result<()> {
+    println!("JSON summary:");
+    let json = serde_json::to_string_pretty(report)?;
+    println!("{json}");
+    Ok(())
 }
 
 fn run_upscale(
@@ -94,7 +149,10 @@ fn run_upscale(
     println!("Backend: {}", config.backend);
     println!("Target:  {}", config.target_resolution);
     println!("Source container: {}", plan.probe.container);
-    println!("Assumed source resolution: {}", plan.probe.assumed_resolution);
+    println!(
+        "Assumed source resolution: {}",
+        plan.probe.assumed_resolution
+    );
     println!("Model summary: {}", plan.inference.summary);
     println!();
     println!("Pipeline stages:");
@@ -103,25 +161,70 @@ fn run_upscale(
     }
     println!();
     println!("Preset details:");
-    println!("- temporal_window:          {}", plan.preset.temporal_window);
+    println!(
+        "- temporal_window:          {}",
+        plan.preset.temporal_window
+    );
     println!("- tile_size:                {}", plan.preset.tile_size);
     println!("- overlap:                  {}", plan.preset.overlap);
-    println!("- diffusion_steps:          {}", plan.preset.diffusion_steps);
-    println!("- fp16:                     {}", plan.preset.use_half_precision);
-    println!("- patch-wise 4K enabled:    {}", plan.preset.enable_patchwise_4k);
-    println!("- structural guidance:      {}", plan.preset.enable_structural_guidance);
-    println!("- detail refiner:           {}", plan.preset.enable_detail_refiner);
-    println!("- temporal checks:          {}", plan.preset.enable_temporal_consistency_checks);
-    println!("- reject on regression:     {}", plan.preset.reject_on_temporal_regression);
-    println!("- anchor_frame_stride:      {}", plan.preset.anchor_frame_stride);
+    println!(
+        "- diffusion_steps:          {}",
+        plan.preset.diffusion_steps
+    );
+    println!(
+        "- fp16:                     {}",
+        plan.preset.use_half_precision
+    );
+    println!(
+        "- patch-wise 4K enabled:    {}",
+        plan.preset.enable_patchwise_4k
+    );
+    println!(
+        "- structural guidance:      {}",
+        plan.preset.enable_structural_guidance
+    );
+    println!(
+        "- detail refiner:           {}",
+        plan.preset.enable_detail_refiner
+    );
+    println!(
+        "- temporal checks:          {}",
+        plan.preset.enable_temporal_consistency_checks
+    );
+    println!(
+        "- reject on regression:     {}",
+        plan.preset.reject_on_temporal_regression
+    );
+    println!(
+        "- anchor_frame_stride:      {}",
+        plan.preset.anchor_frame_stride
+    );
     println!();
     println!("Inference hints:");
-    println!("- patch-wise 4K:            {}", plan.inference.hints.patch_wise_4k);
-    println!("- multi-step diffusion:     {}", plan.inference.hints.multi_step_diffusion);
-    println!("- structural guidance:      {}", plan.inference.hints.structural_guidance);
-    println!("- detail refiner:           {}", plan.inference.hints.detail_refiner);
-    println!("- temporal QC gate:         {}", plan.inference.hints.temporal_qc_gate);
-    println!("- teacher-guided:           {}", plan.inference.hints.teacher_guided);
+    println!(
+        "- patch-wise 4K:            {}",
+        plan.inference.hints.patch_wise_4k
+    );
+    println!(
+        "- multi-step diffusion:     {}",
+        plan.inference.hints.multi_step_diffusion
+    );
+    println!(
+        "- structural guidance:      {}",
+        plan.inference.hints.structural_guidance
+    );
+    println!(
+        "- detail refiner:           {}",
+        plan.inference.hints.detail_refiner
+    );
+    println!(
+        "- temporal QC gate:         {}",
+        plan.inference.hints.temporal_qc_gate
+    );
+    println!(
+        "- teacher-guided:           {}",
+        plan.inference.hints.teacher_guided
+    );
     println!(
         "- custom kernels advised:   {}",
         plan.inference.hints.custom_kernels_recommended
@@ -148,21 +251,5 @@ fn parse_backend(value: &str) -> anyhow::Result<BackendKind> {
         "stcdit-studio" => Ok(BackendKind::StcditStudio),
         "helioframe-master" => Ok(BackendKind::HelioFrameMaster),
         other => anyhow::bail!("unknown backend: {other}"),
-    }
-}
-
-impl FromStr for UpscalePreset {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_preset(s)
-    }
-}
-
-impl FromStr for BackendKind {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_backend(s)
     }
 }
