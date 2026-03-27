@@ -175,6 +175,7 @@ dependencies = [
  "helioframe-core",
  "helioframe-model",
  "helioframe-video",
+ "serde",
  "serde_json",
 ]
 

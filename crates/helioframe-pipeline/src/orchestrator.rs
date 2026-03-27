@@ -13,6 +13,7 @@ use helioframe_video::{
     VideoProbe,
 };
 
+use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
 
 #[derive(Debug, Clone)]
@@ -166,6 +167,7 @@ impl PipelineOrchestrator {
         run_layout.write_manifest(&manifest)?;
 
         let mut decoded_frames = None;
+        let mut shot_detection = None;
 
         for stage in &plan.stages {
             match stage.name {
@@ -177,6 +179,62 @@ impl PipelineOrchestrator {
                         &decode_dir,
                         &plan.decode,
                     )?);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "shots" => {
+                    let started = Instant::now();
+                    let decoded = decoded_frames.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "shots stage cannot run before decode stage".to_string(),
+                        )
+                    })?;
+
+                    let detections = detect_shots(
+                        Path::new(&config.input),
+                        decoded,
+                        DEFAULT_SCDET_THRESHOLD,
+                        plan.preset.temporal_window,
+                    )?;
+
+                    let artifact_path = run_layout.intermediate_artifacts_dir.join("shots.json");
+                    let artifact_json =
+                        serde_json::to_string_pretty(&detections).map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to serialize shot detection artifact: {err}"
+                            ))
+                        })?;
+                    fs::write(&artifact_path, artifact_json).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to write shot detection artifact {}: {err}",
+                            artifact_path.display()
+                        ))
+                    })?;
+
+                    shot_detection = Some(detections);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "window" => {
+                    let started = Instant::now();
+                    let detections = shot_detection.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "window stage cannot run before shots stage".to_string(),
+                        )
+                    })?;
+                    let artifact_path = run_layout
+                        .intermediate_artifacts_dir
+                        .join("temporal_windows.json");
+                    let windows_json =
+                        serde_json::to_string_pretty(&detections.windows).map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to serialize temporal windows artifact: {err}"
+                            ))
+                        })?;
+                    fs::write(&artifact_path, windows_json).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to write temporal windows artifact {}: {err}",
+                            artifact_path.display()
+                        ))
+                    })?;
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "encode" => {
@@ -288,6 +346,28 @@ mod tests {
         assert_eq!(manifest.input, input.to_string_lossy());
         assert_eq!(manifest.output, "output.mp4");
         assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("shots.json")
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join("temporal_windows.json")
+            .exists());
+
+        let windows_raw = std::fs::read_to_string(
+            execution
+                .run_layout
+                .intermediate_artifacts_dir
+                .join("temporal_windows.json"),
+        )
+        .expect("window artifact should be readable");
+        let windows: Vec<crate::stages::TemporalWindow> =
+            serde_json::from_str(&windows_raw).expect("window artifact should parse as json");
+        assert!(!windows.is_empty());
+        assert_eq!(windows[0].start_frame, 0);
 
         std::fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
     }
