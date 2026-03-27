@@ -7,7 +7,7 @@ use std::{
 use helioframe_core::{
     AppConfig, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
 };
-use helioframe_model::{BackendRegistry, InferencePlan};
+use helioframe_model::{BackendRegistry, InferencePlan, WorkerLaunchConfig};
 use helioframe_video::{
     decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
     VideoProbe,
@@ -197,6 +197,7 @@ impl PipelineOrchestrator {
         base_dir: impl AsRef<Path>,
     ) -> HelioFrameResult<RunExecution> {
         let plan = Self::plan(config, preset)?;
+        let backend = BackendRegistry::resolve(config.backend);
         let run_layout = RunLayout::create(base_dir)?;
 
         let probe = RunProbeInfo {
@@ -335,6 +336,27 @@ impl PipelineOrchestrator {
                         "tile manifest",
                     )?;
                     manifest.set_window_tiles(tile_manifests);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "restore" => {
+                    let started = Instant::now();
+                    let decoded = decoded_frames.as_mut().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "restore stage cannot run before decode stage".to_string(),
+                        )
+                    })?;
+                    let worker_launch = WorkerLaunchConfig::new(
+                        &run_layout,
+                        &manifest,
+                        &decoded.frames_dir,
+                        decoded.frame_count,
+                        &manifest.window_tiles,
+                        backend.name(),
+                    );
+                    let worker_result = backend.worker_adapter().run(worker_launch)?;
+
+                    decoded.frames_dir = worker_result.output_frames_dir.clone();
+                    decoded.frame_count = worker_result.frame_count;
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "encode" => {
