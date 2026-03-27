@@ -13,6 +13,10 @@ pub struct EncodePlan {
     pub output_resolution: Resolution,
     pub preserve_audio: bool,
     pub container_hint: &'static str,
+    pub deterministic_output: bool,
+    pub enable_mild_denoise: bool,
+    pub resize_filter: &'static str,
+    pub sharpen_amount: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,10 +155,20 @@ fn run_encode(
     plan: &EncodePlan,
     copy_audio: bool,
 ) -> HelioFrameResult<Output> {
-    let scale_filter = format!(
-        "scale={}:{}:flags=lanczos",
-        plan.output_resolution.width, plan.output_resolution.height
-    );
+    let mut filters = Vec::new();
+    if plan.enable_mild_denoise {
+        filters.push("hqdn3d=1.5:1.5:6:6".to_string());
+    }
+    filters.push(format!(
+        "zscale=w={}:h={}:filter={}",
+        plan.output_resolution.width, plan.output_resolution.height, plan.resize_filter
+    ));
+    if let Some(sharpen_amount) = plan.sharpen_amount {
+        if sharpen_amount > 0.0 {
+            filters.push(format!("unsharp=5:5:{sharpen_amount:.3}:5:5:0.000"));
+        }
+    }
+    let filter_chain = filters.join(",");
 
     let mut command = Command::new("ffmpeg");
     command
@@ -178,7 +192,7 @@ fn run_encode(
 
     command
         .arg("-vf")
-        .arg(scale_filter)
+        .arg(filter_chain)
         .arg("-c:v")
         .arg("libx264")
         .arg("-pix_fmt")
@@ -187,6 +201,13 @@ fn run_encode(
         .arg("passthrough")
         .arg("-movflags")
         .arg("+faststart");
+
+    if plan.deterministic_output {
+        command.arg("-threads").arg("1");
+        command.arg("-fflags").arg("+bitexact");
+        command.arg("-flags:v").arg("+bitexact");
+        command.arg("-flags:a").arg("+bitexact");
+    }
 
     if audio_path.is_some() {
         if copy_audio {

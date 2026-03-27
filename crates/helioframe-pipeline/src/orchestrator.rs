@@ -39,6 +39,7 @@ impl PipelineOrchestrator {
         preset.validate_selection(config.preset, config.backend)?;
         let probe = probe_input(Path::new(&config.input))?;
         let backend = BackendRegistry::resolve(config.backend);
+        let execution_profile = backend.execution_profile();
         let inference = backend.build_plan(config.target_resolution);
 
         let mut stages = vec![
@@ -51,64 +52,80 @@ impl PipelineOrchestrator {
                 name: "decode",
                 description: "Decode video frames and audio through FFmpeg-backed I/O.",
             },
-            PipelineStage {
-                name: "normalize",
-                description:
-                    "Normalize pixel format, transfer characteristics, colorspace, and tensor layout.",
-            },
-            PipelineStage {
-                name: "shots",
-                description:
-                    "Detect scene boundaries so motion and guidance state do not leak across cuts.",
-            },
-            PipelineStage {
-                name: "anchors",
-                description:
-                    "Select anchor frames and guidance frames for structure-sensitive restoration.",
-            },
-            PipelineStage {
-                name: "window",
-                description:
-                    "Build temporal windows sized for high-quality restoration rather than maximum throughput.",
-            },
-            PipelineStage {
-                name: "tile",
-                description:
-                    "Schedule overlap-heavy spatial patches sized for 4K reconstruction and seam suppression.",
-            },
         ];
 
-        stages.push(PipelineStage {
-            name: "restore",
-            description:
-                "Run the primary restoration backend over each temporal window and patch batch.",
-        });
+        if execution_profile.deterministic_output {
+            stages.extend([
+                PipelineStage {
+                    name: "restore",
+                    description: "Run deterministic classical restoration before final encode.",
+                },
+                PipelineStage {
+                    name: "encode",
+                    description:
+                        "Encode deterministic 4K output with zscale=lanczos and optional mild denoise.",
+                },
+            ]);
+        } else {
+            stages.extend([
+                PipelineStage {
+                    name: "normalize",
+                    description:
+                        "Normalize pixel format, transfer characteristics, colorspace, and tensor layout.",
+                },
+                PipelineStage {
+                    name: "shots",
+                    description:
+                        "Detect scene boundaries so motion and guidance state do not leak across cuts.",
+                },
+                PipelineStage {
+                    name: "anchors",
+                    description:
+                        "Select anchor frames and guidance frames for structure-sensitive restoration.",
+                },
+                PipelineStage {
+                    name: "window",
+                    description:
+                        "Build temporal windows sized for high-quality restoration rather than maximum throughput.",
+                },
+                PipelineStage {
+                    name: "tile",
+                    description:
+                        "Schedule overlap-heavy spatial patches sized for 4K reconstruction and seam suppression.",
+                },
+                PipelineStage {
+                    name: "restore",
+                    description:
+                        "Run the primary restoration backend over each temporal window and patch batch.",
+                },
+            ]);
 
-        if preset.enable_detail_refiner || inference.hints.detail_refiner {
-            stages.push(PipelineStage {
-                name: "refine",
-                description: "Apply dedicated high-frequency detail refinement to recover edges, textures, and small structures.",
-            });
+            if preset.enable_detail_refiner || inference.hints.detail_refiner {
+                stages.push(PipelineStage {
+                    name: "refine",
+                    description: "Apply dedicated high-frequency detail refinement to recover edges, textures, and small structures.",
+                });
+            }
+
+            if preset.enable_temporal_consistency_checks || inference.hints.temporal_qc_gate {
+                stages.push(PipelineStage {
+                    name: "temporal-qc",
+                    description: "Measure flicker, drift, and ghosting; optionally reject or rerun unstable windows.",
+                });
+            }
+
+            stages.extend([
+                PipelineStage {
+                    name: "stitch",
+                    description:
+                        "Blend overlaps, reconstruct full frames, and remove tile boundary artifacts.",
+                },
+                PipelineStage {
+                    name: "encode",
+                    description: "Encode final 4K output and remux preserved audio.",
+                },
+            ]);
         }
-
-        if preset.enable_temporal_consistency_checks || inference.hints.temporal_qc_gate {
-            stages.push(PipelineStage {
-                name: "temporal-qc",
-                description: "Measure flicker, drift, and ghosting; optionally reject or rerun unstable windows.",
-            });
-        }
-
-        stages.extend([
-            PipelineStage {
-                name: "stitch",
-                description:
-                    "Blend overlaps, reconstruct full frames, and remove tile boundary artifacts.",
-            },
-            PipelineStage {
-                name: "encode",
-                description: "Encode final 4K output and remux preserved audio.",
-            },
-        ]);
 
         Ok(ExecutionPlan {
             probe,
@@ -118,6 +135,10 @@ impl PipelineOrchestrator {
                 output_resolution: config.target_resolution,
                 preserve_audio: true,
                 container_hint: "mp4",
+                deterministic_output: execution_profile.deterministic_output,
+                enable_mild_denoise: execution_profile.enable_mild_denoise,
+                resize_filter: execution_profile.resize_filter,
+                sharpen_amount: execution_profile.sharpen_amount,
             },
             inference,
             stages,

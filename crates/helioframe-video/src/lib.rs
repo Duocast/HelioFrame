@@ -50,6 +50,10 @@ mod tests {
             },
             preserve_audio: true,
             container_hint: "mp4",
+            deterministic_output: false,
+            enable_mild_denoise: false,
+            resize_filter: "lanczos",
+            sharpen_amount: None,
         };
 
         let encoded =
