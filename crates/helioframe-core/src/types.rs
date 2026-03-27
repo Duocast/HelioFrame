@@ -84,7 +84,7 @@ impl fmt::Display for BackendKind {
 impl BackendKind {
     pub fn supports_strict_4k(self) -> bool {
         match self {
-            Self::ClassicalBaseline => false,
+            Self::ClassicalBaseline => true,
             Self::FastPreview => true,
             Self::SeedvrTeacher => true,
             Self::StcditStudio => true,

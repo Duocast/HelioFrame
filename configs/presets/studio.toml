@@ -1,6 +1,6 @@
 name = "studio"
 default_backend = "stcdit-studio"
-allowed_backends = ["stcdit-studio"]
+allowed_backends = ["stcdit-studio", "classical-baseline"]
 temporal_window = 20
 tile_size = 1024
 overlap = 96

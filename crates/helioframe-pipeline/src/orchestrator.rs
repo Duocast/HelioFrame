@@ -1,13 +1,17 @@
 use std::{
+    fs,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use helioframe_core::{
     AppConfig, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
 };
 use helioframe_model::{BackendRegistry, InferencePlan};
-use helioframe_video::{probe_input, DecodePlan, EncodePlan, VideoProbe};
+use helioframe_video::{
+    decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
+    VideoProbe,
+};
 
 use crate::stages::PipelineStage;
 
@@ -140,10 +144,58 @@ impl PipelineOrchestrator {
         let mut manifest = RunManifest::new(run_layout.run_id.clone(), config, probe);
         run_layout.write_manifest(&manifest)?;
 
+        let mut decoded_frames = None;
+
         for stage in &plan.stages {
-            let started = Instant::now();
-            std::thread::sleep(Duration::from_millis(1));
-            manifest.append_stage_timing(stage.name, started.elapsed());
+            match stage.name {
+                "decode" => {
+                    let started = Instant::now();
+                    let decode_dir = run_layout.intermediate_artifacts_dir.join("decoded");
+                    decoded_frames = Some(decode_to_frame_directory(
+                        Path::new(&config.input),
+                        &decode_dir,
+                        &plan.decode,
+                    )?);
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "encode" => {
+                    let started = Instant::now();
+                    let decoded = decoded_frames.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "encode stage cannot run before decode stage".to_string(),
+                        )
+                    })?;
+                    let output_path = PathBuf::from(&config.output);
+                    if let Some(parent) = output_path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            fs::create_dir_all(parent).map_err(|err| {
+                                helioframe_core::HelioFrameError::Config(format!(
+                                    "failed to create output directory {}: {err}",
+                                    parent.display()
+                                ))
+                            })?;
+                        }
+                    }
+
+                    let encoded =
+                        encode_from_frame_directory(&decoded, &output_path, &plan.encode)?;
+
+                    let artifact_path = run_layout.output_artifacts_dir.join(
+                        output_path
+                            .file_name()
+                            .unwrap_or_else(|| std::ffi::OsStr::new("output.mp4")),
+                    );
+                    fs::copy(&encoded.output_path, artifact_path).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to copy encoded output into run artifacts: {err}"
+                        ))
+                    })?;
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                _ => {
+                    manifest.append_stage_timing(stage.name, std::time::Duration::from_millis(0));
+                }
+            }
             run_layout.write_manifest(&manifest)?;
         }
 
