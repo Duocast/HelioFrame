@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn app_config_validation_rejects_non_strict_4k_backend() {
+    fn app_config_validation_accepts_classical_baseline_backend() {
         let config = AppConfig {
             input: "input.mp4".into(),
             output: "output.mp4".into(),
@@ -163,10 +163,9 @@ mod tests {
             target_resolution: Resolution::UHD_4K,
         };
 
-        let err = config
+        config
             .validate()
-            .expect_err("expected strict 4K backend validation to fail");
-        assert!(matches!(err, HelioFrameError::BackendNotStrict4k { .. }));
+            .expect("classical baseline should now be accepted for strict 4K runs");
     }
 
     #[test]
@@ -198,13 +197,12 @@ mod tests {
     }
 
     #[test]
-    fn preset_validation_rejects_non_strict_4k_allowed_backends() {
+    fn preset_validation_accepts_classical_baseline_allowed_backends() {
         let mut preset = sample_preset();
         preset.allowed_backends.push(BackendKind::ClassicalBaseline);
 
-        let err = preset
+        preset
             .validate()
-            .expect_err("expected strict 4K backend validation to fail");
-        assert!(matches!(err, HelioFrameError::BackendNotStrict4k { .. }));
+            .expect("classical baseline should be accepted in allowed backends");
     }
 }

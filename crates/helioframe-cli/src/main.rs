@@ -22,6 +22,8 @@ enum Commands {
         input: PathBuf,
         #[arg(short, long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
         #[arg(long, default_value = "studio")]
         preset: String,
         #[arg(long)]
@@ -46,11 +48,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Upscale {
             input,
             output,
+            dry_run,
             preset,
             backend,
             width,
             height,
-        } => run_upscale(input, output, preset, backend, width, height),
+        } => run_upscale(input, output, dry_run, preset, backend, width, height),
         Commands::Doctor => run_doctor_command(),
     }
 }
@@ -109,6 +112,7 @@ fn print_json_report(report: &DoctorSummary) -> anyhow::Result<()> {
 fn run_upscale(
     input: PathBuf,
     output: PathBuf,
+    dry_run: bool,
     preset: String,
     backend: Option<String>,
     width: u32,
@@ -140,9 +144,27 @@ fn run_upscale(
         target_resolution: Resolution { width, height },
     };
 
+    if dry_run {
+        let plan = PipelineOrchestrator::plan(&config, preset_cfg)?;
+        print_plan(&config, &plan);
+        println!();
+        println!("Dry run complete. No pipeline stages were executed.");
+        return Ok(());
+    }
+
     let execution = PipelineOrchestrator::execute(&config, preset_cfg)?;
     let plan = &execution.plan;
 
+    print_plan(&config, plan);
+    println!();
+    println!("Run ID: {}", execution.run_layout.run_id);
+    println!("Run directory: {}", execution.run_layout.run_dir.display());
+    println!("Manifest: {}", execution.run_layout.manifest_path.display());
+
+    Ok(())
+}
+
+fn print_plan(config: &AppConfig, plan: &helioframe_pipeline::ExecutionPlan) {
     info!("HelioFrame execution plan");
     println!("Input:   {}", config.input);
     println!("Output:  {}", config.output);
@@ -230,12 +252,6 @@ fn run_upscale(
         "- custom kernels advised:   {}",
         plan.inference.hints.custom_kernels_recommended
     );
-    println!();
-    println!("Run ID: {}", execution.run_layout.run_id);
-    println!("Run directory: {}", execution.run_layout.run_dir.display());
-    println!("Manifest: {}", execution.run_layout.manifest_path.display());
-
-    Ok(())
 }
 
 fn parse_preset(value: &str) -> anyhow::Result<UpscalePreset> {
