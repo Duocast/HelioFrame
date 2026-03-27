@@ -20,6 +20,13 @@ impl Resolution {
                 self.height,
             ));
         }
+
+        if self != Self::UHD_4K {
+            return Err(crate::error::HelioFrameError::UnsupportedTargetResolution(
+                self.width,
+                self.height,
+            ));
+        }
         Ok(self)
     }
 }
@@ -74,6 +81,18 @@ impl fmt::Display for BackendKind {
     }
 }
 
+impl BackendKind {
+    pub fn supports_strict_4k(self) -> bool {
+        match self {
+            Self::ClassicalBaseline => false,
+            Self::FastPreview => true,
+            Self::SeedvrTeacher => true,
+            Self::StcditStudio => true,
+            Self::HelioFrameMaster => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoContainer {
     Mp4,
@@ -115,5 +134,25 @@ impl fmt::Display for VideoContainer {
             Self::M4v => "m4v",
         };
         write!(f, "{value}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Resolution;
+    use crate::HelioFrameError;
+
+    #[test]
+    fn resolution_validation_rejects_non_4k_targets() {
+        let err = Resolution {
+            width: 1920,
+            height: 1080,
+        }
+        .validate()
+        .expect_err("expected unsupported target resolution");
+        assert!(matches!(
+            err,
+            HelioFrameError::UnsupportedTargetResolution(1920, 1080)
+        ));
     }
 }

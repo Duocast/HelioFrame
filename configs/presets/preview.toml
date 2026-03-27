@@ -1,5 +1,6 @@
 name = "preview"
 default_backend = "fast-preview"
+allowed_backends = ["fast-preview"]
 temporal_window = 8
 tile_size = 512
 overlap = 32

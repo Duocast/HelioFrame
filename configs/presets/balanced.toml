@@ -1,5 +1,6 @@
 name = "balanced"
-default_backend = "classical-baseline"
+default_backend = "fast-preview"
+allowed_backends = ["fast-preview", "stcdit-studio"]
 temporal_window = 12
 tile_size = 640
 overlap = 48
