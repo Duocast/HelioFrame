@@ -1,6 +1,11 @@
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
-use helioframe_core::{AppConfig, HelioFrameResult, PresetConfig};
+use helioframe_core::{
+    AppConfig, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
+};
 use helioframe_model::{BackendRegistry, InferencePlan};
 use helioframe_video::{probe_input, DecodePlan, EncodePlan, VideoProbe};
 
@@ -16,6 +21,12 @@ pub struct ExecutionPlan {
     pub stages: Vec<PipelineStage>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RunExecution {
+    pub plan: ExecutionPlan,
+    pub run_layout: RunLayout,
+}
+
 pub struct PipelineOrchestrator;
 
 impl PipelineOrchestrator {
@@ -29,7 +40,8 @@ impl PipelineOrchestrator {
         let mut stages = vec![
             PipelineStage {
                 name: "probe",
-                description: "Inspect container, stream metadata, codec compatibility, and source resolution.",
+                description:
+                    "Inspect container, stream metadata, codec compatibility, and source resolution.",
             },
             PipelineStage {
                 name: "decode",
@@ -37,23 +49,28 @@ impl PipelineOrchestrator {
             },
             PipelineStage {
                 name: "normalize",
-                description: "Normalize pixel format, transfer characteristics, colorspace, and tensor layout.",
+                description:
+                    "Normalize pixel format, transfer characteristics, colorspace, and tensor layout.",
             },
             PipelineStage {
                 name: "shots",
-                description: "Detect scene boundaries so motion and guidance state do not leak across cuts.",
+                description:
+                    "Detect scene boundaries so motion and guidance state do not leak across cuts.",
             },
             PipelineStage {
                 name: "anchors",
-                description: "Select anchor frames and guidance frames for structure-sensitive restoration.",
+                description:
+                    "Select anchor frames and guidance frames for structure-sensitive restoration.",
             },
             PipelineStage {
                 name: "window",
-                description: "Build temporal windows sized for high-quality restoration rather than maximum throughput.",
+                description:
+                    "Build temporal windows sized for high-quality restoration rather than maximum throughput.",
             },
             PipelineStage {
                 name: "tile",
-                description: "Schedule overlap-heavy spatial patches sized for 4K reconstruction and seam suppression.",
+                description:
+                    "Schedule overlap-heavy spatial patches sized for 4K reconstruction and seam suppression.",
             },
         ];
 
@@ -101,5 +118,98 @@ impl PipelineOrchestrator {
             inference,
             stages,
         })
+    }
+
+    pub fn execute(config: &AppConfig, preset: PresetConfig) -> HelioFrameResult<RunExecution> {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::execute_in_dir(config, preset, base_dir)
+    }
+
+    pub fn execute_in_dir(
+        config: &AppConfig,
+        preset: PresetConfig,
+        base_dir: impl AsRef<Path>,
+    ) -> HelioFrameResult<RunExecution> {
+        let plan = Self::plan(config, preset)?;
+        let run_layout = RunLayout::create(base_dir)?;
+
+        let probe = RunProbeInfo {
+            container: plan.probe.container.to_string(),
+            assumed_resolution: plan.probe.assumed_resolution.to_string(),
+        };
+        let mut manifest = RunManifest::new(run_layout.run_id.clone(), config, probe);
+        run_layout.write_manifest(&manifest)?;
+
+        for stage in &plan.stages {
+            let started = Instant::now();
+            std::thread::sleep(Duration::from_millis(1));
+            manifest.append_stage_timing(stage.name, started.elapsed());
+            run_layout.write_manifest(&manifest)?;
+        }
+
+        Ok(RunExecution { plan, run_layout })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use helioframe_core::{BackendKind, Resolution, UpscalePreset};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn sample_preset() -> PresetConfig {
+        PresetConfig {
+            name: "studio".into(),
+            default_backend: BackendKind::StcditStudio,
+            allowed_backends: vec![BackendKind::StcditStudio, BackendKind::SeedvrTeacher],
+            temporal_window: 20,
+            tile_size: 1024,
+            overlap: 96,
+            diffusion_steps: 16,
+            use_half_precision: true,
+            enable_patchwise_4k: true,
+            enable_structural_guidance: true,
+            enable_detail_refiner: true,
+            enable_temporal_consistency_checks: true,
+            reject_on_temporal_regression: true,
+            anchor_frame_stride: 4,
+            notes: "test".into(),
+        }
+    }
+
+    #[test]
+    fn execute_writes_incremental_manifest_to_run_directory() {
+        let temp = std::env::temp_dir().join(format!(
+            "helioframe-orchestrator-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+
+        let config = AppConfig {
+            input: "input.mp4".into(),
+            output: "output.mp4".into(),
+            backend: BackendKind::StcditStudio,
+            preset: UpscalePreset::Studio,
+            target_resolution: Resolution::UHD_4K,
+        };
+
+        let execution = PipelineOrchestrator::execute_in_dir(&config, sample_preset(), &temp)
+            .expect("execution should create run artifacts");
+
+        assert!(execution.run_layout.run_dir.exists());
+        assert!(execution.run_layout.manifest_path.exists());
+
+        let raw_manifest = std::fs::read_to_string(&execution.run_layout.manifest_path)
+            .expect("manifest should be readable");
+        let manifest: RunManifest =
+            serde_json::from_str(&raw_manifest).expect("manifest should parse as json");
+
+        assert_eq!(manifest.input, "input.mp4");
+        assert_eq!(manifest.output, "output.mp4");
+        assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
+
+        std::fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
     }
 }
