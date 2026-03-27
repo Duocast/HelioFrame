@@ -1,10 +1,12 @@
 pub mod decoder;
 pub mod encoder;
 pub mod probe;
+pub mod stitch;
 
 pub use decoder::{decode_to_frame_directory, DecodePlan, DecodedFrames};
 pub use encoder::{encode_from_frame_directory, EncodePlan, EncodeResult};
 pub use probe::{probe_input, VideoProbe};
+pub use stitch::{stitch_tiles, FrameTile, StitchPlan, StitchResult};
 
 #[cfg(test)]
 mod tests {
