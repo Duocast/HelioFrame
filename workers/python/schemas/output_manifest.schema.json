@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helioframe.dev/schemas/python-worker/output-manifest-1.0.0.json",
+  "title": "HelioFrame Python Worker Output Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "clip_id",
+    "status",
+    "mode",
+    "input_manifest_schema_version",
+    "output_frames_dir",
+    "frame_count",
+    "frames"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clip_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "mode": {
+      "type": "string",
+      "const": "passthrough"
+    },
+    "input_manifest_schema_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output_frames_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "file_name", "source_sha256", "output_sha256"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "output_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "string"
+    }
+  }
+}
