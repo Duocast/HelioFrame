@@ -1,4 +1,4 @@
-use crate::{HelioFrameError, HelioFrameResult, BackendKind, Resolution, UpscalePreset};
+use crate::{BackendKind, HelioFrameError, HelioFrameResult, Resolution, UpscalePreset};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 

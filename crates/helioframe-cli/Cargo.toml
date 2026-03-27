@@ -11,3 +11,4 @@ helioframe-pipeline = { path = "../helioframe-pipeline" }
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+serde_json.workspace = true
