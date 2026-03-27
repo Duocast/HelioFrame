@@ -9,6 +9,8 @@ pub struct ExecutionHints {
     pub temporal_qc_gate: bool,
     pub teacher_guided: bool,
     pub custom_kernels_recommended: bool,
+    pub temporal_window_inference: bool,
+    pub bridge_backend_label: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]

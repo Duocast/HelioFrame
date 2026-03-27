@@ -105,6 +105,7 @@ pub enum BackendKind {
     FastPreview,
     SeedvrTeacher,
     StcditStudio,
+    RealBasicVsrBridge,
     HelioFrameMaster,
 }
 
@@ -115,6 +116,7 @@ impl fmt::Display for BackendKind {
             Self::FastPreview => "fast-preview",
             Self::SeedvrTeacher => "seedvr-teacher",
             Self::StcditStudio => "stcdit-studio",
+            Self::RealBasicVsrBridge => "realbasicvsr-bridge",
             Self::HelioFrameMaster => "helioframe-master",
         };
         write!(f, "{value}")
@@ -128,6 +130,7 @@ impl BackendKind {
             Self::FastPreview => true,
             Self::SeedvrTeacher => true,
             Self::StcditStudio => true,
+            Self::RealBasicVsrBridge => true,
             Self::HelioFrameMaster => true,
         }
     }

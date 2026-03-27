@@ -2,11 +2,8 @@
 """HelioFrame process-based Python worker.
 
 This worker accepts a single positional argument pointing to an input
-manifest JSON file. It reads a decoded frame directory and writes the exact
-same frames to an output frame directory (pass-through behavior for HF-014).
-
-The worker writes an output manifest next to the provided input manifest unless
-`output_manifest_path` is set in the input payload.
+manifest JSON file. It reads decoded input frames, runs a selected backend,
+and writes processed frames plus an output manifest.
 """
 
 from __future__ import annotations
@@ -34,6 +31,8 @@ class InputManifest:
     schema_version: str
     run_id: str
     clip_id: str
+    backend: str
+    backend_options: dict[str, Any]
     input_frames_dir: Path
     output_frames_dir: Path
     output_manifest_path: Path
@@ -97,10 +96,20 @@ def load_input_manifest(path: Path) -> InputManifest:
     output_manifest = payload.get("output_manifest_path")
     default_output_manifest = path.parent / "worker-output-manifest.json"
 
+    backend = payload.get("backend", "passthrough")
+    if not isinstance(backend, str) or not backend.strip():
+        raise ValueError("manifest field `backend` must be a non-empty string when provided")
+
+    backend_options = payload.get("backend_options", {})
+    if not isinstance(backend_options, dict):
+        raise ValueError("manifest field `backend_options` must be an object")
+
     return InputManifest(
         schema_version=schema_version,
         run_id=_require_string(payload, "run_id"),
         clip_id=_require_string(payload, "clip_id"),
+        backend=backend,
+        backend_options=backend_options,
         input_frames_dir=Path(_require_string(payload, "input_frames_dir")),
         output_frames_dir=Path(_require_string(payload, "output_frames_dir")),
         output_manifest_path=Path(output_manifest)
@@ -110,10 +119,7 @@ def load_input_manifest(path: Path) -> InputManifest:
     )
 
 
-def run_worker(manifest: InputManifest) -> dict[str, Any]:
-    manifest.input_frames_dir.mkdir(parents=True, exist_ok=True)
-    manifest.output_frames_dir.mkdir(parents=True, exist_ok=True)
-
+def _run_passthrough(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     output_frames: list[dict[str, Any]] = []
 
     for frame in manifest.frames:
@@ -134,16 +140,63 @@ def run_worker(manifest: InputManifest) -> dict[str, Any]:
             }
         )
 
+    return output_frames, {"backend": "passthrough"}
+
+
+def _run_realbasicvsr(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    options = manifest.backend_options
+    model_path = Path(options.get("model_path", "models/realbasicvsr/realbasicvsr_x4.ts"))
+    if not model_path.is_absolute():
+        model_path = Path.cwd() / model_path
+
+    from backends import RealBasicVSRBackend
+
+    backend = RealBasicVSRBackend(
+        model_path=model_path,
+        device=str(options.get("device", "cuda")),
+        window_size=int(options.get("window_size", 6)),
+        overlap=int(options.get("overlap", 2)),
+        precision=str(options.get("precision", "fp16")),
+    )
+
+    written, backend_meta = backend.run(manifest, sha256_fn=_sha256)
+    output_frames = [
+        {
+            "index": frame.index,
+            "file_name": frame.file_name,
+            "source_sha256": frame.source_sha256,
+            "output_sha256": frame.output_sha256,
+        }
+        for frame in written
+    ]
+    return output_frames, backend_meta
+
+
+def run_worker(manifest: InputManifest) -> dict[str, Any]:
+    manifest.input_frames_dir.mkdir(parents=True, exist_ok=True)
+    manifest.output_frames_dir.mkdir(parents=True, exist_ok=True)
+
+    backend_name = manifest.backend.strip().lower()
+    if backend_name in {"passthrough", "classical-baseline"}:
+        output_frames, backend_meta = _run_passthrough(manifest)
+        mode = "passthrough"
+    elif backend_name in {"realbasicvsr", "realbasicvsr-bridge"}:
+        output_frames, backend_meta = _run_realbasicvsr(manifest)
+        mode = "realbasicvsr"
+    else:
+        raise ValueError(f"unsupported worker backend `{manifest.backend}`")
+
     return {
         "schema_version": OUTPUT_SCHEMA_VERSION,
         "run_id": manifest.run_id,
         "clip_id": manifest.clip_id,
         "status": "ok",
-        "mode": "passthrough",
+        "mode": mode,
         "input_manifest_schema_version": manifest.schema_version,
         "output_frames_dir": str(manifest.output_frames_dir),
         "frame_count": len(output_frames),
         "frames": output_frames,
+        "backend": backend_meta,
     }
 
 
