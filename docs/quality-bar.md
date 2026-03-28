@@ -20,3 +20,16 @@ HelioFrame should optimize for these failure modes in descending priority:
 ## Release rule
 
 A faster backend may never replace the studio backend as the default unless it matches the studio backend on temporal stability and structural fidelity in regression tests.
+
+## Benchmark acceptance harness
+
+Use `scripts/benchmark.sh` as the baseline quality gate command.
+
+Quality-review outputs are stored in per-run directories:
+
+- `.helioframe/benchmarks/<run>/runs/` — backend run directories containing CLI manifests and logs.
+- `.helioframe/benchmarks/<run>/outputs/` — per-clip backend render outputs.
+- `.helioframe/benchmarks/<run>/review/` — side-by-side videos for visual QA.
+- `.helioframe/benchmarks/<run>/metrics.json` — machine-readable benchmark metrics.
+
+The clip manifest includes category buckets (`synthetic`, `real-world`, `torture`) and must be identical across compared backends for each benchmark run.
