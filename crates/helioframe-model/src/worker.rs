@@ -24,6 +24,28 @@ pub fn python_exe() -> &'static str {
     }
 }
 
+/// Resolves the path to `workers/python/worker.py`.
+///
+/// Searches relative to the running executable and its ancestor directories
+/// (handling layouts like `target/release/`), then falls back to a path
+/// relative to the current working directory.
+pub fn resolve_worker_script() -> PathBuf {
+    let relative = Path::new("workers").join("python").join("worker.py");
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent();
+        while let Some(ancestor) = dir {
+            let candidate = ancestor.join(&relative);
+            if candidate.exists() {
+                return candidate;
+            }
+            dir = ancestor.parent();
+        }
+    }
+
+    relative
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum WorkerAdapter {
     PythonProcess,
@@ -154,7 +176,7 @@ fn run_python_worker(
     })?;
 
     let mut child = Command::new(python_exe())
-        .arg("workers/python/worker.py")
+        .arg(resolve_worker_script())
         .arg(&input_manifest_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
