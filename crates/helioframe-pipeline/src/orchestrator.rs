@@ -556,7 +556,7 @@ impl PipelineOrchestrator {
                     })?;
 
                     let mut child = std::process::Command::new(helioframe_model::python_exe())
-                        .arg("workers/python/worker.py")
+                        .arg(helioframe_model::resolve_worker_script())
                         .arg(&refine_input_manifest_path)
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
@@ -1104,7 +1104,7 @@ impl PipelineOrchestrator {
                     })?;
 
                     let mut child = std::process::Command::new(helioframe_model::python_exe())
-                        .arg("workers/python/worker.py")
+                        .arg(helioframe_model::resolve_worker_script())
                         .arg(&refine_input_manifest_path)
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
