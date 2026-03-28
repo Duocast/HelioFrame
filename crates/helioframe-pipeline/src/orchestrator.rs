@@ -9,7 +9,8 @@ use helioframe_core::{
     TemporalQcManifest, TemporalQcSummary, TemporalQcWindowStatus, WindowTileManifest,
 };
 use helioframe_model::{
-    BackendRegistry, InferencePlan, RerunPolicy, TemporalQcPolicy, WorkerLaunchConfig,
+    BackendRegistry, DetailRefinementPolicy, InferencePlan, RerunPolicy, TemporalQcPolicy,
+    WorkerLaunchConfig,
 };
 use helioframe_video::{
     decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
@@ -24,6 +25,7 @@ use crate::windows::build_windows_and_batches;
 
 const WINDOWS_ARTIFACT_FILENAME: &str = "windows.json";
 const ANCHORS_ARTIFACT_FILENAME: &str = "anchors.json";
+const DETAIL_REFINE_ARTIFACT_FILENAME: &str = "detail_refine.json";
 const TEMPORAL_QC_ARTIFACT_FILENAME: &str = "temporal_qc.json";
 
 #[derive(Debug, serde::Serialize)]
@@ -394,6 +396,164 @@ impl PipelineOrchestrator {
 
                     decoded.frames_dir = worker_result.output_frames_dir.clone();
                     decoded.frame_count = worker_result.frame_count;
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "refine" => {
+                    let started = Instant::now();
+                    let decoded = decoded_frames.as_mut().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "refine stage cannot run before decode stage".to_string(),
+                        )
+                    })?;
+
+                    let detail_policy = DetailRefinementPolicy::default();
+                    let refiner_options = serde_json::json!({
+                        "model_path": "models/detail-refiner/detail_refiner_v1.0.0.ts",
+                        "model_version": "detail-refiner-v1.0.0",
+                        "weights_sha256": "b8d4f2a1e6c73950d2b1e4a8f7c3d6b9e5a2f8c1d7b4e0a3f6c9d2b5e8a1f4c7",
+                        "device": "cuda",
+                        "refinement_steps": detail_policy.refinement_steps,
+                        "refinement_strength": detail_policy.refinement_strength,
+                        "hf_energy_threshold": detail_policy.hf_energy_threshold,
+                        "max_hf_flicker": detail_policy.sparkle_guard.max_hf_flicker,
+                        "max_patch_shimmer": detail_policy.sparkle_guard.max_patch_shimmer,
+                        "categories": detail_policy.categories.iter()
+                            .map(|c| serde_json::to_value(c).unwrap_or_default())
+                            .collect::<Vec<_>>(),
+                        "patch_size": 128,
+                        "precision": if plan.preset.use_half_precision { "fp16" } else { "fp32" },
+                    });
+
+                    let refine_worker_io_dir = run_layout
+                        .intermediate_artifacts_dir
+                        .join("worker_refine");
+                    fs::create_dir_all(&refine_worker_io_dir).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to create refine worker I/O directory: {err}"
+                        ))
+                    })?;
+                    let refine_output_frames_dir = refine_worker_io_dir.join("frames");
+                    let refine_input_manifest_path =
+                        refine_worker_io_dir.join("refine-input.json");
+                    let refine_output_manifest_path =
+                        refine_worker_io_dir.join("refine-output.json");
+
+                    let refine_frames: Vec<serde_json::Value> = (0..decoded.frame_count)
+                        .map(|index| {
+                            serde_json::json!({
+                                "index": index,
+                                "file_name": format!("frame_{index:010}.png"),
+                            })
+                        })
+                        .collect();
+
+                    let refine_manifest = serde_json::json!({
+                        "schema_version": "1.0.0",
+                        "run_id": manifest.run_id,
+                        "clip_id": "detail-refine-job",
+                        "backend": "detail-refiner",
+                        "backend_options": refiner_options,
+                        "input_frames_dir": decoded.frames_dir.to_string_lossy(),
+                        "output_frames_dir": refine_output_frames_dir.to_string_lossy(),
+                        "output_manifest_path": refine_output_manifest_path.to_string_lossy(),
+                        "frames": refine_frames,
+                    });
+
+                    let payload = serde_json::to_string_pretty(&refine_manifest).map_err(
+                        |err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to serialize refine worker input manifest: {err}"
+                            ))
+                        },
+                    )?;
+                    fs::write(&refine_input_manifest_path, payload).map_err(|err| {
+                        helioframe_core::HelioFrameError::Config(format!(
+                            "failed to write refine worker input manifest: {err}"
+                        ))
+                    })?;
+
+                    let mut child = std::process::Command::new("python3")
+                        .arg("workers/python/worker.py")
+                        .arg(&refine_input_manifest_path)
+                        .spawn()
+                        .map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to launch detail refiner worker: {err}"
+                            ))
+                        })?;
+
+                    let timeout = std::time::Duration::from_secs(300);
+                    let child_started = Instant::now();
+                    loop {
+                        if let Some(status) = child.try_wait().map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to poll detail refiner worker: {err}"
+                            ))
+                        })? {
+                            if !status.success() {
+                                return Err(helioframe_core::HelioFrameError::Config(
+                                    format!("detail refiner worker exited with status {status}"),
+                                ));
+                            }
+                            break;
+                        }
+                        if child_started.elapsed() >= timeout {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err(helioframe_core::HelioFrameError::Config(
+                                "detail refiner worker timed out".to_string(),
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+
+                    let raw_output =
+                        fs::read_to_string(&refine_output_manifest_path).map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "detail refiner worker did not produce output manifest: {err}"
+                            ))
+                        })?;
+
+                    let output_parsed: serde_json::Value =
+                        serde_json::from_str(&raw_output).map_err(|err| {
+                            helioframe_core::HelioFrameError::Config(format!(
+                                "failed to parse detail refiner output manifest: {err}"
+                            ))
+                        })?;
+
+                    if output_parsed.get("status").and_then(|v| v.as_str()) != Some("ok") {
+                        return Err(helioframe_core::HelioFrameError::Config(format!(
+                            "detail refiner worker failed with status `{}`",
+                            output_parsed
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown"),
+                        )));
+                    }
+
+                    let refine_frame_count = output_parsed
+                        .get("frame_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+
+                    if refine_frame_count != decoded.frame_count {
+                        return Err(helioframe_core::HelioFrameError::Config(format!(
+                            "detail refiner frame count mismatch: expected {}, got {}",
+                            decoded.frame_count, refine_frame_count,
+                        )));
+                    }
+
+                    // Update decoded frames to point at refined output.
+                    decoded.frames_dir = refine_output_frames_dir;
+
+                    // Write refine stage artifact with backend metadata.
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        DETAIL_REFINE_ARTIFACT_FILENAME,
+                        &output_parsed,
+                        "detail refinement",
+                    )?;
+
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "temporal-qc" => {
