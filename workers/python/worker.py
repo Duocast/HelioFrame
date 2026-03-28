@@ -211,6 +211,47 @@ def _run_seedvr_teacher(manifest: InputManifest) -> tuple[list[dict[str, Any]], 
     ]
     return output_frames, backend_meta
 
+def _run_detail_refiner(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    options = manifest.backend_options
+    model_path = Path(options.get("model_path", "models/detail-refiner/detail_refiner_v1.0.0.ts"))
+    if not model_path.is_absolute():
+        model_path = Path.cwd() / model_path
+
+    from backends import DetailRefinerBackend
+
+    backend = DetailRefinerBackend(
+        model_path=model_path,
+        model_version=str(options.get("model_version", "detail-refiner-v1.0.0")),
+        expected_weights_sha256=str(
+            options.get(
+                "weights_sha256",
+                "b8d4f2a1e6c73950d2b1e4a8f7c3d6b9e5a2f8c1d7b4e0a3f6c9d2b5e8a1f4c7",
+            )
+        ),
+        device=str(options.get("device", "cuda")),
+        refinement_steps=int(options.get("refinement_steps", 6)),
+        refinement_strength=float(options.get("refinement_strength", 0.4)),
+        hf_energy_threshold=float(options.get("hf_energy_threshold", 0.25)),
+        max_hf_flicker=float(options.get("max_hf_flicker", 0.12)),
+        max_patch_shimmer=float(options.get("max_patch_shimmer", 0.08)),
+        categories=options.get("categories"),
+        patch_size=int(options.get("patch_size", 128)),
+        precision=str(options.get("precision", "fp16")),
+    )
+
+    written, backend_meta = backend.run(manifest, sha256_fn=_sha256)
+    output_frames = [
+        {
+            "index": frame.index,
+            "file_name": frame.file_name,
+            "source_sha256": frame.source_sha256,
+            "output_sha256": frame.output_sha256,
+        }
+        for frame in written
+    ]
+    return output_frames, backend_meta
+
+
 def _run_stcdit_studio(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     options = manifest.backend_options
     model_path = Path(options.get("model_path", "models/stcdit-studio/stcdit_studio_v1.0.0.ts"))
@@ -267,6 +308,9 @@ def run_worker(manifest: InputManifest) -> dict[str, Any]:
     elif backend_name in {"stcdit-studio", "stcdit_studio"}:
         output_frames, backend_meta = _run_stcdit_studio(manifest)
         mode = "stcdit-studio"
+    elif backend_name in {"detail-refiner", "detail_refiner"}:
+        output_frames, backend_meta = _run_detail_refiner(manifest)
+        mode = "detail-refiner"
     else:
         raise ValueError(f"unsupported worker backend `{manifest.backend}`")
 
