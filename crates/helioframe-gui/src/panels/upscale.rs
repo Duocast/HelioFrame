@@ -398,14 +398,9 @@ fn run_pipeline_thread(
     use helioframe_core::{AppConfig, PresetConfig, Resolution};
     use crate::state::{StageStatus, LogLevel};
 
-    let preset_path = match preset {
-        UpscalePreset::Preview => "configs/presets/preview.toml",
-        UpscalePreset::Balanced => "configs/presets/balanced.toml",
-        UpscalePreset::Studio => "configs/presets/studio.toml",
-        UpscalePreset::Experimental => "configs/presets/experimental.toml",
-    };
+    let preset_path = PresetConfig::resolve_preset_path(preset);
 
-    let preset_cfg = match PresetConfig::load_from_file(preset_path) {
+    let preset_cfg = match PresetConfig::load_from_file(&preset_path) {
         Ok(cfg) => cfg,
         Err(e) => {
             if let Ok(mut p) = pipeline.lock() {

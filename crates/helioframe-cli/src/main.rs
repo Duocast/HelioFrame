@@ -120,15 +120,10 @@ fn run_upscale(
 ) -> anyhow::Result<()> {
     let preset = parse_preset(&preset)?;
 
-    let preset_path = match preset {
-        UpscalePreset::Preview => "configs/presets/preview.toml",
-        UpscalePreset::Balanced => "configs/presets/balanced.toml",
-        UpscalePreset::Studio => "configs/presets/studio.toml",
-        UpscalePreset::Experimental => "configs/presets/experimental.toml",
-    };
+    let preset_path = PresetConfig::resolve_preset_path(preset);
 
-    let preset_cfg = PresetConfig::load_from_file(preset_path)
-        .with_context(|| format!("unable to load preset from {preset_path}"))?;
+    let preset_cfg = PresetConfig::load_from_file(&preset_path)
+        .with_context(|| format!("unable to load preset from {}", preset_path.display()))?;
 
     let backend = backend
         .as_deref()
