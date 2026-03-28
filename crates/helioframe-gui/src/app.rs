@@ -1,5 +1,4 @@
-use eframe::Frame;
-use egui::{CentralPanel, Context, CornerRadius, RichText, SidePanel, Stroke};
+use egui::{CornerRadius, Panel, RichText, Stroke, Ui};
 
 use crate::panels::{diagnostics, progress, settings, sidebar, upscale};
 use crate::state::{ActivePanel, AppState};
@@ -19,16 +18,18 @@ impl HelioFrameApp {
 }
 
 impl eframe::App for HelioFrameApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         // Handle keyboard shortcuts
-        handle_shortcuts(ctx, &mut self.state);
+        handle_shortcuts(&ctx, &mut self.state);
 
         // Handle file drops
-        handle_file_drops(ctx, &mut self.state);
+        handle_file_drops(&ctx, &mut self.state);
 
         // About dialog
         if self.state.show_about {
-            draw_about_window(ctx, &mut self.state);
+            draw_about_window(&ctx, &mut self.state);
         }
 
         // Drop zone overlay
@@ -36,32 +37,29 @@ impl eframe::App for HelioFrameApp {
             egui::Area::new(egui::Id::new("drop_overlay"))
                 .fixed_pos(egui::Pos2::ZERO)
                 .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     crate::widgets::drop_zone_overlay(ui);
                 });
         }
 
         // ── Sidebar ─────────────────────────────────────────
-        SidePanel::left("sidebar")
-            .exact_width(220.0)
+        Panel::left("sidebar")
+            .exact_size(220.0)
             .frame(
                 egui::Frame::new()
                     .fill(Palette::BG_DARK)
                     .stroke(Stroke::new(1.0, Palette::BORDER))
                     .inner_margin(egui::Margin::symmetric(8, 12)),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 sidebar::draw_sidebar(ui, &mut self.state);
             });
 
-        // ── Main Content ────────────────────────────────────
-        CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(Palette::BG_PANEL)
-                    .inner_margin(egui::Margin::symmetric(24, 16)),
-            )
-            .show(ctx, |ui| {
+        // ── Main Content (rendered in the remaining central area) ──
+        egui::Frame::new()
+            .fill(Palette::BG_PANEL)
+            .inner_margin(egui::Margin::symmetric(24, 16))
+            .show(ui, |ui| {
                 match self.state.active_panel {
                     ActivePanel::Upscale => upscale::draw_upscale_panel(ui, &mut self.state),
                     ActivePanel::Progress => progress::draw_progress_panel(ui, &mut self.state),
@@ -74,7 +72,7 @@ impl eframe::App for HelioFrameApp {
     }
 }
 
-fn handle_shortcuts(ctx: &Context, state: &mut AppState) {
+fn handle_shortcuts(ctx: &egui::Context, state: &mut AppState) {
     ctx.input(|i| {
         // Ctrl+1-4 for panel switching
         if i.modifiers.command {
@@ -108,7 +106,7 @@ fn handle_shortcuts(ctx: &Context, state: &mut AppState) {
     });
 }
 
-fn handle_file_drops(ctx: &Context, state: &mut AppState) {
+fn handle_file_drops(ctx: &egui::Context, state: &mut AppState) {
     // Track hover state for overlay
     ctx.input(|i| {
         state.file_drop_hover = !i.raw.hovered_files.is_empty();
@@ -135,7 +133,7 @@ fn handle_file_drops(ctx: &Context, state: &mut AppState) {
     }
 }
 
-fn draw_about_window(ctx: &Context, state: &mut AppState) {
+fn draw_about_window(ctx: &egui::Context, state: &mut AppState) {
     egui::Window::new("About HelioFrame")
         .collapsible(false)
         .resizable(false)

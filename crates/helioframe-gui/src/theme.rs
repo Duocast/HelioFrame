@@ -103,5 +103,5 @@ pub fn apply_theme(ctx: &egui::Context) {
     visuals.error_fg_color = Palette::ERROR;
 
     style.visuals = visuals;
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
