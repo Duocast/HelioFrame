@@ -200,7 +200,7 @@ impl InferenceBackend for StcditStudio {
         InferencePlan {
             backend: self.kind(),
             target_resolution,
-            summary: "Primary studio backend using multi-step diffusion, structural guidance, patch-wise 4K scheduling, and strict temporal quality control.".into(),
+            summary: "Primary studio backend using anchor-frame-aware segment-wise diffusion, structural guidance, patch-wise 4K scheduling, and strict temporal quality control.".into(),
             hints: ExecutionHints {
                 patch_wise_4k: true,
                 multi_step_diffusion: true,
@@ -209,8 +209,8 @@ impl InferenceBackend for StcditStudio {
                 temporal_qc_gate: true,
                 teacher_guided: false,
                 custom_kernels_recommended: true,
-                temporal_window_inference: false,
-                bridge_backend_label: None,
+                temporal_window_inference: true,
+                bridge_backend_label: Some("stcdit-studio"),
             },
         }
     }

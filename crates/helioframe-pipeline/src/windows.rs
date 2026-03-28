@@ -1,5 +1,69 @@
 use helioframe_core::{SceneBoundary, TemporalWindow, WindowedClipBatch};
 
+/// A segment within a temporal window, associated with its governing anchor frame.
+/// Each segment contains frames closest to one particular anchor, enabling
+/// anchor-frame-aware restoration where the model conditions on the anchor.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AnchorSegment {
+    pub start_frame: usize,
+    pub end_frame_exclusive: usize,
+    pub anchor_frame: usize,
+}
+
+/// Split a temporal window into anchor-governed segments.
+///
+/// Each frame is assigned to the segment of its nearest anchor frame.
+/// Segment boundaries fall at midpoints between consecutive anchors.
+pub fn build_anchor_segments(window: &TemporalWindow) -> Vec<AnchorSegment> {
+    let start = window.start_frame;
+    let end = window.end_frame_exclusive;
+
+    if start >= end {
+        return vec![];
+    }
+
+    let anchors = &window.anchor_frames;
+    if anchors.is_empty() {
+        return vec![AnchorSegment {
+            start_frame: start,
+            end_frame_exclusive: end,
+            anchor_frame: start,
+        }];
+    }
+
+    if anchors.len() == 1 {
+        return vec![AnchorSegment {
+            start_frame: start,
+            end_frame_exclusive: end,
+            anchor_frame: anchors[0],
+        }];
+    }
+
+    let mut segments = Vec::with_capacity(anchors.len());
+    for i in 0..anchors.len() {
+        let seg_start = if i == 0 {
+            start
+        } else {
+            (anchors[i - 1] + anchors[i]) / 2
+        };
+        let seg_end = if i == anchors.len() - 1 {
+            end
+        } else {
+            (anchors[i] + anchors[i + 1]) / 2
+        };
+
+        if seg_start < seg_end {
+            segments.push(AnchorSegment {
+                start_frame: seg_start,
+                end_frame_exclusive: seg_end,
+                anchor_frame: anchors[i],
+            });
+        }
+    }
+
+    segments
+}
+
 pub fn build_windows_and_batches(
     frame_count: usize,
     boundaries: &[SceneBoundary],
@@ -153,6 +217,54 @@ mod tests {
         assert_eq!(windows[2].anchor_frames, vec![10, 14]);
         assert_eq!(windows[3].anchor_frames, vec![15]);
         assert_eq!(batches[2].anchor_frames, vec![10, 14]);
+    }
+
+    #[test]
+    fn anchor_segments_split_at_midpoints() {
+        let window = TemporalWindow {
+            start_frame: 0,
+            end_frame_exclusive: 20,
+            anchor_frames: vec![0, 4, 8, 12, 16],
+        };
+        let segments = build_anchor_segments(&window);
+        assert_eq!(
+            segments,
+            vec![
+                AnchorSegment { start_frame: 0, end_frame_exclusive: 2, anchor_frame: 0 },
+                AnchorSegment { start_frame: 2, end_frame_exclusive: 6, anchor_frame: 4 },
+                AnchorSegment { start_frame: 6, end_frame_exclusive: 10, anchor_frame: 8 },
+                AnchorSegment { start_frame: 10, end_frame_exclusive: 14, anchor_frame: 12 },
+                AnchorSegment { start_frame: 14, end_frame_exclusive: 20, anchor_frame: 16 },
+            ]
+        );
+    }
+
+    #[test]
+    fn anchor_segments_single_anchor_covers_full_window() {
+        let window = TemporalWindow {
+            start_frame: 5,
+            end_frame_exclusive: 15,
+            anchor_frames: vec![8],
+        };
+        let segments = build_anchor_segments(&window);
+        assert_eq!(
+            segments,
+            vec![AnchorSegment { start_frame: 5, end_frame_exclusive: 15, anchor_frame: 8 }]
+        );
+    }
+
+    #[test]
+    fn anchor_segments_empty_anchors_fall_back_to_window_start() {
+        let window = TemporalWindow {
+            start_frame: 10,
+            end_frame_exclusive: 20,
+            anchor_frames: vec![],
+        };
+        let segments = build_anchor_segments(&window);
+        assert_eq!(
+            segments,
+            vec![AnchorSegment { start_frame: 10, end_frame_exclusive: 20, anchor_frame: 10 }]
+        );
     }
 
     #[test]
