@@ -61,3 +61,34 @@ class WorkerPassthroughTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkerManifestParsingTest(unittest.TestCase):
+    def test_backend_name_alias_is_supported(self) -> None:
+        from workers.python.worker import load_input_manifest
+
+        with tempfile.TemporaryDirectory(prefix="hf-worker-manifest-") as tmp:
+            root = Path(tmp)
+            input_dir = root / "in"
+            output_dir = root / "out"
+            input_dir.mkdir(parents=True)
+            (input_dir / "frame_000000.png").write_bytes(b"data")
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0.0",
+                        "run_id": "run-test-002",
+                        "clip_id": "clip-002",
+                        "backend_name": "seedvr-teacher",
+                        "backend_options": {"offline_only": True},
+                        "input_frames_dir": str(input_dir),
+                        "output_frames_dir": str(output_dir),
+                        "frames": [{"index": 0, "file_name": "frame_000000.png"}],
+                    }
+                )
+            )
+
+            parsed = load_input_manifest(manifest_path)
+            self.assertEqual(parsed.backend, "seedvr-teacher")
+            self.assertEqual(parsed.backend_options["offline_only"], True)

@@ -1,6 +1,6 @@
 name = "studio"
 default_backend = "stcdit-studio"
-allowed_backends = ["stcdit-studio", "classical-baseline"]
+allowed_backends = ["stcdit-studio", "seedvr-teacher", "classical-baseline"]
 temporal_window = 20
 tile_size = 512
 overlap = 64
@@ -12,4 +12,4 @@ enable_detail_refiner = true
 enable_temporal_consistency_checks = true
 reject_on_temporal_regression = true
 anchor_frame_stride = 4
-notes = "Primary quality-first preset for final 4K delivery."
+notes = "Primary quality-first preset for final 4K delivery with optional seedvr-teacher offline reference runs."

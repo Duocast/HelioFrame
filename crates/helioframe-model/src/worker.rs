@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use helioframe_core::{RunLayout, RunManifest, WindowTileManifest};
+use helioframe_core::{BackendKind, RunLayout, RunManifest, WindowTileManifest};
 
 const INPUT_SCHEMA_VERSION: &str = "1.0.0";
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
@@ -22,7 +22,7 @@ pub struct WorkerLaunchConfig<'a> {
     pub input_frames_dir: &'a Path,
     pub frame_count: usize,
     pub window_tiles: &'a [WindowTileManifest],
-    pub backend_name: &'a str,
+    pub backend_kind: BackendKind,
     pub worker_timeout: Duration,
 }
 
@@ -33,7 +33,7 @@ impl<'a> WorkerLaunchConfig<'a> {
         input_frames_dir: &'a Path,
         frame_count: usize,
         window_tiles: &'a [WindowTileManifest],
-        backend_name: &'a str,
+        backend_kind: BackendKind,
     ) -> Self {
         Self {
             run_layout,
@@ -41,7 +41,7 @@ impl<'a> WorkerLaunchConfig<'a> {
             input_frames_dir,
             frame_count,
             window_tiles,
-            backend_name,
+            backend_kind,
             worker_timeout: WORKER_TIMEOUT,
         }
     }
@@ -65,7 +65,8 @@ struct WorkerInputManifest {
     schema_version: &'static str,
     run_id: String,
     clip_id: String,
-    backend_name: String,
+    backend: String,
+    backend_options: serde_json::Value,
     input_frames_dir: String,
     output_frames_dir: String,
     output_manifest_path: String,
@@ -167,6 +168,29 @@ fn run_python_worker(
     })
 }
 
+fn default_backend_options(backend_kind: BackendKind) -> serde_json::Value {
+    match backend_kind {
+        BackendKind::RealBasicVsrBridge => serde_json::json!({
+            "model_path": "models/realbasicvsr/realbasicvsr_x4.ts",
+            "device": "cuda",
+            "window_size": 6,
+            "overlap": 2,
+            "precision": "fp16"
+        }),
+        BackendKind::SeedvrTeacher => serde_json::json!({
+            "model_path": "models/seedvr-teacher/seedvr_teacher_v1.0.0.ts",
+            "model_version": "seedvr-teacher-v1.0.0",
+            "weights_sha256": "c2c0d9ec5b0c8c1f8b03419e7f3e462f8ab7604f53f6ed15ec5122f7e14b8079",
+            "offline_only": true,
+            "device": "cuda",
+            "window_size": 12,
+            "overlap": 4,
+            "precision": "fp32"
+        }),
+        _ => serde_json::json!({}),
+    }
+}
+
 fn build_worker_input_manifest(
     config: &WorkerLaunchConfig<'_>,
     output_frames_dir: &Path,
@@ -183,7 +207,8 @@ fn build_worker_input_manifest(
         schema_version: INPUT_SCHEMA_VERSION,
         run_id: config.manifest.run_id.clone(),
         clip_id: "window-patch-job".to_string(),
-        backend_name: config.backend_name.to_string(),
+        backend: config.backend_kind.to_string(),
+        backend_options: default_backend_options(config.backend_kind),
         input_frames_dir: config.input_frames_dir.to_string_lossy().to_string(),
         output_frames_dir: output_frames_dir.to_string_lossy().to_string(),
         output_manifest_path: output_manifest_path.to_string_lossy().to_string(),

@@ -167,8 +167,8 @@ impl InferenceBackend for SeedvrTeacher {
                 temporal_qc_gate: true,
                 teacher_guided: true,
                 custom_kernels_recommended: true,
-                temporal_window_inference: false,
-                bridge_backend_label: None,
+                temporal_window_inference: true,
+                bridge_backend_label: Some("seedvr-teacher"),
             },
         }
     }
