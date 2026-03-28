@@ -160,7 +160,11 @@ fn nav_button(
         })
         .response;
 
-    if resp.interact(egui::Sense::click()).clicked() {
+    let resp = resp.interact(egui::Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if resp.clicked() {
         on_click();
     }
 }
