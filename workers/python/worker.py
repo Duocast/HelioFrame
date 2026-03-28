@@ -211,6 +211,45 @@ def _run_seedvr_teacher(manifest: InputManifest) -> tuple[list[dict[str, Any]], 
     ]
     return output_frames, backend_meta
 
+def _run_stcdit_studio(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    options = manifest.backend_options
+    model_path = Path(options.get("model_path", "models/stcdit-studio/stcdit_studio_v1.0.0.ts"))
+    if not model_path.is_absolute():
+        model_path = Path.cwd() / model_path
+
+    from backends import STCDiTStudioBackend
+
+    backend = STCDiTStudioBackend(
+        model_path=model_path,
+        model_version=str(options.get("model_version", "stcdit-studio-v1.0.0")),
+        expected_weights_sha256=str(
+            options.get(
+                "weights_sha256",
+                "a7b3e1f0c4d29856e1a0f3b7c8d5e2a9f6b4c1d8e5a2f7b3c0d6e9a1f4b8c5d2",
+            )
+        ),
+        device=str(options.get("device", "cuda")),
+        window_size=int(options.get("window_size", 20)),
+        overlap=int(options.get("overlap", 4)),
+        precision=str(options.get("precision", "fp16")),
+        diffusion_steps=int(options.get("diffusion_steps", 16)),
+        guidance_scale=float(options.get("guidance_scale", 7.5)),
+        anchor_frame_stride=int(options.get("anchor_frame_stride", 4)),
+    )
+
+    written, backend_meta = backend.run(manifest, sha256_fn=_sha256)
+    output_frames = [
+        {
+            "index": frame.index,
+            "file_name": frame.file_name,
+            "source_sha256": frame.source_sha256,
+            "output_sha256": frame.output_sha256,
+        }
+        for frame in written
+    ]
+    return output_frames, backend_meta
+
+
 def run_worker(manifest: InputManifest) -> dict[str, Any]:
     manifest.input_frames_dir.mkdir(parents=True, exist_ok=True)
     manifest.output_frames_dir.mkdir(parents=True, exist_ok=True)
@@ -225,6 +264,9 @@ def run_worker(manifest: InputManifest) -> dict[str, Any]:
     elif backend_name in {"seedvr-teacher", "seedvr_teacher"}:
         output_frames, backend_meta = _run_seedvr_teacher(manifest)
         mode = "seedvr-teacher"
+    elif backend_name in {"stcdit-studio", "stcdit_studio"}:
+        output_frames, backend_meta = _run_stcdit_studio(manifest)
+        mode = "stcdit-studio"
     else:
         raise ValueError(f"unsupported worker backend `{manifest.backend}`")
 

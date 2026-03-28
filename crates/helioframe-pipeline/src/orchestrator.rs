@@ -5,7 +5,7 @@ use std::{
 };
 
 use helioframe_core::{
-    AppConfig, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
+    AppConfig, BackendKind, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
     TemporalQcManifest, TemporalQcSummary, TemporalQcWindowStatus, WindowTileManifest,
 };
 use helioframe_model::{
@@ -18,7 +18,7 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
-use crate::temporal_qc::{evaluate_windows, select_rerun_windows};
+use crate::temporal_qc::{evaluate_windows, evaluate_windows_strict, select_rerun_windows};
 use crate::tiling::build_window_tile_manifests;
 use crate::windows::build_windows_and_batches;
 
@@ -414,7 +414,15 @@ impl PipelineOrchestrator {
                         reject_if_unstable: plan.preset.reject_on_temporal_regression,
                         ..TemporalQcPolicy::default()
                     };
-                    let mut qc_report = evaluate_windows(windows, tiles, &qc_policy);
+                    let use_strict_gate = matches!(
+                        config.backend,
+                        BackendKind::StcditStudio
+                    );
+                    let mut qc_report = if use_strict_gate {
+                        evaluate_windows_strict(windows, tiles, &qc_policy)
+                    } else {
+                        evaluate_windows(windows, tiles, &qc_policy)
+                    };
                     let max_attempts = match qc_policy.rerun_policy {
                         Some(RerunPolicy::FailedWindows { max_attempts }) => max_attempts,
                         _ => 0,

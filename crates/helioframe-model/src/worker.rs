@@ -187,6 +187,18 @@ fn default_backend_options(backend_kind: BackendKind) -> serde_json::Value {
             "overlap": 4,
             "precision": "fp32"
         }),
+        BackendKind::StcditStudio => serde_json::json!({
+            "model_path": "models/stcdit-studio/stcdit_studio_v1.0.0.ts",
+            "model_version": "stcdit-studio-v1.0.0",
+            "weights_sha256": "a7b3e1f0c4d29856e1a0f3b7c8d5e2a9f6b4c1d8e5a2f7b3c0d6e9a1f4b8c5d2",
+            "device": "cuda",
+            "window_size": 20,
+            "overlap": 4,
+            "precision": "fp16",
+            "diffusion_steps": 16,
+            "guidance_scale": 7.5,
+            "anchor_frame_stride": 4
+        }),
         _ => serde_json::json!({}),
     }
 }
