@@ -2,7 +2,7 @@ use crate::{
     BackendKind, HelioFrameError, HelioFrameResult, Resolution, UpscalePreset, VideoContainer,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{fs, path::{Path, PathBuf}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -48,6 +48,35 @@ pub struct PresetConfig {
 }
 
 impl PresetConfig {
+    /// Resolves the path to a preset TOML file for the given preset.
+    ///
+    /// Tries the following locations in order:
+    /// 1. Next to the running executable (e.g. `<exe_dir>/configs/presets/<name>.toml`)
+    /// 2. Relative to the current working directory
+    pub fn resolve_preset_path(preset: UpscalePreset) -> PathBuf {
+        let filename = match preset {
+            UpscalePreset::Preview => "preview.toml",
+            UpscalePreset::Balanced => "balanced.toml",
+            UpscalePreset::Studio => "studio.toml",
+            UpscalePreset::Experimental => "experimental.toml",
+        };
+
+        let relative = Path::new("configs").join("presets").join(filename);
+
+        // Try resolving relative to the executable's directory first.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let candidate = exe_dir.join(&relative);
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+
+        // Fall back to a (platform-aware) relative path from the CWD.
+        relative
+    }
+
     pub fn load_from_file(path: impl AsRef<Path>) -> HelioFrameResult<Self> {
         let raw = fs::read_to_string(path.as_ref())
             .map_err(|err| HelioFrameError::Config(format!("failed to read preset: {err}")))?;
