@@ -466,8 +466,22 @@ fn run_pipeline_thread(
         return;
     }
 
+    // Build a logger that pushes messages into the shared PipelineState.
+    let log_pipeline = pipeline.clone();
+    let logger = helioframe_pipeline::PipelineLogger::new(move |msg| {
+        if let Ok(mut p) = log_pipeline.lock() {
+            let level = match msg.level {
+                helioframe_pipeline::PipelineLogLevel::Debug => LogLevel::Debug,
+                helioframe_pipeline::PipelineLogLevel::Info => LogLevel::Info,
+                helioframe_pipeline::PipelineLogLevel::Warn => LogLevel::Warn,
+                helioframe_pipeline::PipelineLogLevel::Error => LogLevel::Error,
+            };
+            p.push_log(level, msg.message);
+        }
+    });
+
     // Full execution
-    match helioframe_pipeline::PipelineOrchestrator::execute(&config, preset_cfg) {
+    match helioframe_pipeline::PipelineOrchestrator::execute_with_logger(&config, preset_cfg, logger) {
         Ok(execution) => {
             if let Ok(mut p) = pipeline.lock() {
                 p.run_id = Some(execution.run_layout.run_id.clone());

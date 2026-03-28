@@ -12,4 +12,4 @@ pub use quality::{
     SparkleGuardThresholds, TemporalQcPolicy, TemporalQcThresholds,
 };
 pub use traits::InferenceBackend;
-pub use worker::{python_exe, WorkerAdapter, WorkerLaunchConfig, WorkerRunResult};
+pub use worker::{python_exe, WorkerAdapter, WorkerLaunchConfig, WorkerOutputCallback, WorkerRunResult};

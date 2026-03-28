@@ -17,6 +17,7 @@ use helioframe_video::{
     VideoProbe,
 };
 
+use crate::logger::PipelineLogger;
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
 use crate::temporal_qc::{evaluate_windows, evaluate_windows_strict, select_rerun_windows};
@@ -225,17 +226,40 @@ impl PipelineOrchestrator {
 
     pub fn execute(config: &AppConfig, preset: PresetConfig) -> HelioFrameResult<RunExecution> {
         let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::execute_in_dir(config, preset, base_dir)
+        Self::execute_in_dir(config, preset, base_dir, PipelineLogger::noop())
+    }
+
+    pub fn execute_with_logger(
+        config: &AppConfig,
+        preset: PresetConfig,
+        logger: PipelineLogger,
+    ) -> HelioFrameResult<RunExecution> {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::execute_in_dir(config, preset, base_dir, logger)
     }
 
     pub fn execute_in_dir(
         config: &AppConfig,
         preset: PresetConfig,
         base_dir: impl AsRef<Path>,
+        logger: PipelineLogger,
     ) -> HelioFrameResult<RunExecution> {
         let plan = Self::plan(config, preset)?;
         let backend = BackendRegistry::resolve(config.backend);
         let run_layout = RunLayout::create(base_dir)?;
+
+        logger.info(format!("Run ID: {}", run_layout.run_id));
+        logger.info(format!("Run directory: {}", run_layout.run_dir.display()));
+        logger.info(format!("Backend: {}, Worker: {:?}", backend.kind(), backend.worker_adapter()));
+        logger.info(format!("Target resolution: {}", config.target_resolution));
+        logger.info(format!("Pipeline stages: {}", plan.stages.iter().map(|s| s.name).collect::<Vec<_>>().join(" -> ")));
+        logger.debug(format!("Preset tile_size={}, overlap={}, temporal_window={}", plan.preset.tile_size, plan.preset.overlap, plan.preset.temporal_window));
+        if plan.preset.enable_detail_refiner {
+            logger.debug("Detail refiner: enabled".to_string());
+        }
+        if plan.preset.enable_temporal_consistency_checks {
+            logger.debug("Temporal QC gate: enabled".to_string());
+        }
 
         let probe = RunProbeInfo {
             container: plan.probe.container.to_string(),
@@ -249,11 +273,23 @@ impl PipelineOrchestrator {
         let mut temporal_windows = None;
         let mut temporal_window_tiles: Option<Vec<WindowTileManifest>> = None;
 
-        for stage in &plan.stages {
+        let total_stages = plan.stages.len();
+        for (stage_idx, stage) in plan.stages.iter().enumerate() {
+            logger.info(format!("[{}/{}] Starting stage: {} — {}", stage_idx + 1, total_stages, stage.name, stage.description));
             match stage.name {
                 "probe" => {
                     let started = Instant::now();
                     let probe = &plan.probe;
+                    logger.info(format!("  Container: {}", probe.container));
+                    logger.info(format!("  Resolution: {}", probe.assumed_resolution));
+                    logger.info(format!("  FPS: {:.2}, Duration: {:.1}s", probe.fps, probe.duration_seconds));
+                    logger.info(format!("  Codec: {}, Audio: {}", probe.video_codec, if probe.has_audio { "yes" } else { "no" }));
+                    if let Some(ref pf) = probe.pixel_format {
+                        logger.debug(format!("  Pixel format: {pf}"));
+                    }
+                    if let Some(ref cs) = probe.colorspace {
+                        logger.debug(format!("  Colorspace: {cs}"));
+                    }
                     let probe_artifact = ProbeArtifact {
                         container: probe.container.to_string(),
                         assumed_resolution: probe.assumed_resolution.to_string(),
@@ -270,16 +306,21 @@ impl PipelineOrchestrator {
                         &probe_artifact,
                         "probe",
                     )?;
+                    logger.debug(format!("  Wrote artifact: probe.json ({:.0}ms)", started.elapsed().as_secs_f64() * 1000.0));
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "decode" => {
                     let started = Instant::now();
                     let decode_dir = run_layout.intermediate_artifacts_dir.join("decoded");
+                    logger.debug(format!("  Decoding to: {}", decode_dir.display()));
                     decoded_frames = Some(decode_to_frame_directory(
                         Path::new(&config.input),
                         &decode_dir,
                         &plan.decode,
                     )?);
+                    if let Some(ref df) = decoded_frames {
+                        logger.info(format!("  Decoded {} frames to {}", df.frame_count, df.frames_dir.display()));
+                    }
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "shots" => {
@@ -289,10 +330,12 @@ impl PipelineOrchestrator {
                             "shots stage cannot run before decode stage".to_string(),
                         )
                     })?;
+                    logger.debug(format!("  Scene detection threshold: {DEFAULT_SCDET_THRESHOLD}"));
 
                     let detections =
                         detect_shots(Path::new(&config.input), decoded, DEFAULT_SCDET_THRESHOLD)?;
 
+                    logger.info(format!("  Detected {} scene boundaries across {} frames", detections.boundaries.len(), detections.frame_count));
                     Self::write_stage_artifact(
                         &run_layout,
                         "shots.json",
@@ -316,6 +359,8 @@ impl PipelineOrchestrator {
                         plan.preset.temporal_window,
                         plan.preset.anchor_frame_stride,
                     );
+                    logger.info(format!("  Built {} temporal windows, {} batches", windows.len(), batches.len()));
+                    logger.debug(format!("  Window size: {}, anchor stride: {}", plan.preset.temporal_window, plan.preset.anchor_frame_stride));
                     Self::write_stage_artifact(
                         &run_layout,
                         WINDOWS_ARTIFACT_FILENAME,
@@ -344,6 +389,8 @@ impl PipelineOrchestrator {
                         .iter()
                         .map(|window| window.anchor_frames.clone())
                         .collect();
+                    let total_anchors: usize = anchors.iter().map(|a| a.len()).sum();
+                    logger.info(format!("  Selected {total_anchors} anchor frames across {} windows", anchors.len()));
                     Self::write_stage_artifact(
                         &run_layout,
                         ANCHORS_ARTIFACT_FILENAME,
@@ -367,6 +414,7 @@ impl PipelineOrchestrator {
                         plan.preset.tile_size,
                         plan.preset.overlap,
                     );
+                    logger.info(format!("  Scheduled {} tile patches ({}x{} tiles, {} overlap)", tile_manifests.len(), plan.preset.tile_size, plan.preset.tile_size, plan.preset.overlap));
                     Self::write_stage_artifact(
                         &run_layout,
                         "tile_manifest.json",
@@ -384,6 +432,8 @@ impl PipelineOrchestrator {
                             "restore stage cannot run before decode stage".to_string(),
                         )
                     })?;
+                    logger.info(format!("  Launching {} worker for {} frames, {} tile jobs", backend.kind(), decoded.frame_count, manifest.window_tiles.len()));
+                    logger.debug(format!("  Input frames dir: {}", decoded.frames_dir.display()));
                     let worker_launch = WorkerLaunchConfig::new(
                         &run_layout,
                         &manifest,
@@ -392,8 +442,17 @@ impl PipelineOrchestrator {
                         &manifest.window_tiles,
                         backend.kind(),
                     );
-                    let worker_result = backend.worker_adapter().run(worker_launch)?;
+                    let log_for_worker = logger.clone();
+                    let on_output: helioframe_model::WorkerOutputCallback = Box::new(move |line, is_stderr| {
+                        if is_stderr {
+                            log_for_worker.warn(format!("  [worker stderr] {line}"));
+                        } else {
+                            log_for_worker.debug(format!("  [worker stdout] {line}"));
+                        }
+                    });
+                    let worker_result = backend.worker_adapter().run_with_output(worker_launch, Some(on_output))?;
 
+                    logger.info(format!("  Restore complete: {} output frames in {}", worker_result.frame_count, worker_result.output_frames_dir.display()));
                     decoded.frames_dir = worker_result.output_frames_dir.clone();
                     decoded.frame_count = worker_result.frame_count;
                     manifest.append_stage_timing(stage.name, started.elapsed());
@@ -411,7 +470,9 @@ impl PipelineOrchestrator {
                         )
                     })?;
 
+                    logger.info(format!("  Refining {} frames across {} windows", decoded.frame_count, windows.len()));
                     let detail_policy = DetailRefinementPolicy::default();
+                    logger.debug(format!("  Refinement steps: {}, strength: {:.2}", detail_policy.refinement_steps, detail_policy.refinement_strength));
                     let refiner_options = serde_json::json!({
                         "model_path": "models/detail-refiner/detail_refiner_v1.0.0.ts",
                         "model_version": "detail-refiner-v1.0.0",
@@ -497,12 +558,36 @@ impl PipelineOrchestrator {
                     let mut child = std::process::Command::new(helioframe_model::python_exe())
                         .arg("workers/python/worker.py")
                         .arg(&refine_input_manifest_path)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
                         .spawn()
                         .map_err(|err| {
                             helioframe_core::HelioFrameError::Config(format!(
                                 "failed to launch detail refiner worker: {err}"
                             ))
                         })?;
+
+                    // Drain stdout/stderr in background threads.
+                    let refine_stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                    let refine_stdout_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                    let refine_stdout_h = child.stdout.take().map(|pipe| {
+                        let captured = refine_stdout_buf.clone();
+                        std::thread::spawn(move || {
+                            let reader = std::io::BufReader::new(pipe);
+                            for line in std::io::BufRead::lines(reader) {
+                                if let Ok(line) = line { captured.lock().unwrap().push(line); }
+                            }
+                        })
+                    });
+                    let refine_stderr_h = child.stderr.take().map(|pipe| {
+                        let captured = refine_stderr_buf.clone();
+                        std::thread::spawn(move || {
+                            let reader = std::io::BufReader::new(pipe);
+                            for line in std::io::BufRead::lines(reader) {
+                                if let Ok(line) = line { captured.lock().unwrap().push(line); }
+                            }
+                        })
+                    });
 
                     let timeout = std::time::Duration::from_secs(300);
                     let child_started = Instant::now();
@@ -512,9 +597,17 @@ impl PipelineOrchestrator {
                                 "failed to poll detail refiner worker: {err}"
                             ))
                         })? {
+                            if let Some(h) = refine_stdout_h { let _ = h.join(); }
+                            if let Some(h) = refine_stderr_h { let _ = h.join(); }
                             if !status.success() {
+                                let stderr_text = refine_stderr_buf.lock().unwrap().join("\n");
+                                let detail = if stderr_text.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("\n--- refiner stderr ---\n{stderr_text}")
+                                };
                                 return Err(helioframe_core::HelioFrameError::Config(
-                                    format!("detail refiner worker exited with status {status}"),
+                                    format!("detail refiner worker exited with status {status}{detail}"),
                                 ));
                             }
                             break;
@@ -600,16 +693,18 @@ impl PipelineOrchestrator {
                         config.backend,
                         BackendKind::StcditStudio
                     );
+                    logger.debug(format!("  QC mode: {}", if use_strict_gate { "strict" } else { "standard" }));
                     let mut qc_report = if use_strict_gate {
                         evaluate_windows_strict(windows, tiles, &qc_policy)
                     } else {
                         evaluate_windows(windows, tiles, &qc_policy)
                     };
+                    logger.info(format!("  QC report: {} total windows, {} unstable", qc_report.windows.len(), qc_report.unstable_window_indices.len()));
                     let max_attempts = match qc_policy.rerun_policy {
                         Some(RerunPolicy::FailedWindows { max_attempts }) => max_attempts,
                         _ => 0,
                     };
-                    for _ in 0..max_attempts {
+                    for attempt in 0..max_attempts {
                         let rerun_window_indices = select_rerun_windows(
                             &qc_report.unstable_window_indices,
                             qc_policy.rerun_policy.as_ref(),
@@ -617,6 +712,7 @@ impl PipelineOrchestrator {
                         if rerun_window_indices.is_empty() {
                             break;
                         }
+                        logger.info(format!("  QC rerun attempt {}: re-processing {} windows", attempt + 1, rerun_window_indices.len()));
 
                         let decoded = decoded_frames.as_mut().ok_or_else(|| {
                             helioframe_core::HelioFrameError::Config(
@@ -644,9 +740,11 @@ impl PipelineOrchestrator {
                         let next_report = evaluate_windows(windows, tiles, &qc_policy);
                         if next_report.unstable_window_indices == qc_report.unstable_window_indices
                         {
+                            logger.warn(format!("  QC rerun did not improve unstable window count (still {})", next_report.unstable_window_indices.len()));
                             qc_report = next_report;
                             break;
                         }
+                        logger.info(format!("  QC rerun reduced unstable windows: {} -> {}", qc_report.unstable_window_indices.len(), next_report.unstable_window_indices.len()));
                         qc_report = next_report;
                     }
 
@@ -660,6 +758,7 @@ impl PipelineOrchestrator {
                     manifest.set_temporal_qc(Self::build_temporal_qc_manifest(&qc_report));
 
                     if qc_report.should_reject_run {
+                        logger.error(format!("  Temporal QC REJECTED run: {} unstable windows", qc_report.unstable_window_indices.len()));
                         return Err(helioframe_core::HelioFrameError::Config(format!(
                             "temporal QC rejected run: {} unstable windows detected",
                             qc_report.unstable_window_indices.len()
@@ -676,6 +775,8 @@ impl PipelineOrchestrator {
                         )
                     })?;
                     let output_path = PathBuf::from(&config.output);
+                    logger.info(format!("  Encoding {} frames to {}", decoded.frame_count, output_path.display()));
+                    logger.debug(format!("  Output resolution: {}, preserve_audio: {}", plan.encode.output_resolution, plan.encode.preserve_audio));
                     if let Some(parent) = output_path.parent() {
                         if !parent.as_os_str().is_empty() {
                             fs::create_dir_all(parent).map_err(|err| {
@@ -690,6 +791,7 @@ impl PipelineOrchestrator {
                     let encoded =
                         encode_from_frame_directory(&decoded, &output_path, &plan.encode)?;
 
+                    logger.info(format!("  Encoded output: {}", encoded.output_path.display()));
                     let artifact_path = run_layout.output_artifacts_dir.join(
                         output_path
                             .file_name()
@@ -706,10 +808,13 @@ impl PipelineOrchestrator {
                     manifest.append_stage_timing(stage.name, std::time::Duration::from_millis(0));
                 }
             }
+            let elapsed_ms = manifest.stage_timings.last().map(|t| t.elapsed_ms).unwrap_or(0);
+            logger.info(format!("[{}/{}] Completed stage: {} ({:.1}s)", stage_idx + 1, total_stages, stage.name, elapsed_ms as f64 / 1000.0));
             manifest.mark_stage_completed(stage.name);
             run_layout.write_manifest(&manifest)?;
         }
 
+        logger.info(format!("Pipeline finished successfully. Run: {}", run_layout.run_id));
         Ok(RunExecution { plan, run_layout })
     }
 
@@ -1001,12 +1106,36 @@ impl PipelineOrchestrator {
                     let mut child = std::process::Command::new(helioframe_model::python_exe())
                         .arg("workers/python/worker.py")
                         .arg(&refine_input_manifest_path)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
                         .spawn()
                         .map_err(|err| {
                             helioframe_core::HelioFrameError::Config(format!(
                                 "failed to launch detail refiner worker: {err}"
                             ))
                         })?;
+
+                    // Drain stdout/stderr in background threads.
+                    let refine_stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                    let refine_stdout_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                    let refine_stdout_h = child.stdout.take().map(|pipe| {
+                        let captured = refine_stdout_buf.clone();
+                        std::thread::spawn(move || {
+                            let reader = std::io::BufReader::new(pipe);
+                            for line in std::io::BufRead::lines(reader) {
+                                if let Ok(line) = line { captured.lock().unwrap().push(line); }
+                            }
+                        })
+                    });
+                    let refine_stderr_h = child.stderr.take().map(|pipe| {
+                        let captured = refine_stderr_buf.clone();
+                        std::thread::spawn(move || {
+                            let reader = std::io::BufReader::new(pipe);
+                            for line in std::io::BufRead::lines(reader) {
+                                if let Ok(line) = line { captured.lock().unwrap().push(line); }
+                            }
+                        })
+                    });
 
                     let timeout = std::time::Duration::from_secs(300);
                     let child_started = Instant::now();
@@ -1016,9 +1145,17 @@ impl PipelineOrchestrator {
                                 "failed to poll detail refiner worker: {err}"
                             ))
                         })? {
+                            if let Some(h) = refine_stdout_h { let _ = h.join(); }
+                            if let Some(h) = refine_stderr_h { let _ = h.join(); }
                             if !status.success() {
+                                let stderr_text = refine_stderr_buf.lock().unwrap().join("\n");
+                                let detail = if stderr_text.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("\n--- refiner stderr ---\n{stderr_text}")
+                                };
                                 return Err(helioframe_core::HelioFrameError::Config(
-                                    format!("detail refiner worker exited with status {status}"),
+                                    format!("detail refiner worker exited with status {status}{detail}"),
                                 ));
                             }
                             break;
@@ -1383,7 +1520,7 @@ mod tests {
             target_resolution: Resolution::UHD_4K,
         };
 
-        let execution = PipelineOrchestrator::execute_in_dir(&config, sample_preset(), &temp)
+        let execution = PipelineOrchestrator::execute_in_dir(&config, sample_preset(), &temp, PipelineLogger::noop())
             .expect("execution should create run artifacts");
 
         assert!(execution.run_layout.run_dir.exists());
