@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus},
+    process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 
@@ -9,6 +9,7 @@ use helioframe_core::{BackendKind, RunLayout, RunManifest, WindowTileManifest};
 
 const INPUT_SCHEMA_VERSION: &str = "1.0.0";
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
+const WORKER_SCRIPT_RELATIVE: &str = "workers/python/worker.py";
 
 /// Returns the platform-appropriate Python executable name.
 ///
@@ -22,6 +23,39 @@ pub fn python_exe() -> &'static str {
         "python3"
     }
 }
+
+/// Resolves the absolute path to the Python worker script.
+///
+/// Walks up from the executable's directory (handling layouts like
+/// `target/release/`) to find `workers/python/worker.py`, mirroring the
+/// strategy used by [`PresetConfig::resolve_preset_path`].  Falls back to
+/// the relative path if the executable location cannot be determined.
+pub fn resolve_worker_script() -> PathBuf {
+    let relative = Path::new(WORKER_SCRIPT_RELATIVE);
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent();
+        while let Some(ancestor) = dir {
+            let candidate = ancestor.join(relative);
+            if candidate.exists() {
+                return candidate;
+            }
+            dir = ancestor.parent();
+        }
+    }
+    relative.to_path_buf()
+}
+
+/// Applies Windows-specific process creation flags to hide the console
+/// window that would otherwise flash when spawning a subprocess from a GUI.
+#[cfg(target_os = "windows")]
+pub fn apply_platform_flags(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn apply_platform_flags(_cmd: &mut Command) {}
 
 #[derive(Debug, Clone, Copy)]
 pub enum WorkerAdapter {
@@ -137,15 +171,20 @@ fn run_python_worker(
         ))
     })?;
 
-    let mut child = Command::new(python_exe())
-        .arg("workers/python/worker.py")
+    let worker_script = resolve_worker_script();
+    let mut cmd = Command::new(python_exe());
+    cmd.arg(&worker_script)
         .arg(&input_manifest_path)
-        .spawn()
-        .map_err(|err| {
-            helioframe_core::HelioFrameError::Config(format!(
-                "failed to launch python worker: {err}"
-            ))
-        })?;
+        .stderr(Stdio::piped());
+    apply_platform_flags(&mut cmd);
+
+    let mut child = cmd.spawn().map_err(|err| {
+        helioframe_core::HelioFrameError::Config(format!(
+            "failed to launch python worker (script={}, python={}): {err}",
+            worker_script.display(),
+            python_exe(),
+        ))
+    })?;
 
     wait_for_child_with_timeout(&mut child, config.worker_timeout, "python worker")?;
 
@@ -272,6 +311,21 @@ fn build_worker_input_manifest(
     }
 }
 
+/// Reads whatever stderr the child has produced so far (non-blocking-safe
+/// because we only call this after the child has exited or been killed).
+fn collect_stderr(child: &mut Child) -> String {
+    child
+        .stderr
+        .take()
+        .and_then(|mut pipe| {
+            use std::io::Read;
+            let mut buf = String::new();
+            pipe.read_to_string(&mut buf).ok()?;
+            Some(buf)
+        })
+        .unwrap_or_default()
+}
+
 fn wait_for_child_with_timeout(
     child: &mut Child,
     timeout: Duration,
@@ -289,16 +343,28 @@ fn wait_for_child_with_timeout(
                 return Ok(status);
             }
 
+            let stderr = collect_stderr(child);
+            let detail = if stderr.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nstderr:\n{stderr}")
+            };
             return Err(helioframe_core::HelioFrameError::Config(format!(
-                "{process_label} exited with status {status}"
+                "{process_label} exited with status {status}{detail}"
             )));
         }
 
         if started.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
+            let stderr = collect_stderr(child);
+            let detail = if stderr.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nstderr:\n{stderr}")
+            };
             return Err(helioframe_core::HelioFrameError::Config(format!(
-                "{process_label} timed out after {} seconds",
+                "{process_label} timed out after {} seconds{detail}",
                 timeout.as_secs()
             )));
         }
