@@ -131,17 +131,26 @@ pub fn evaluate_windows(
         });
     }
 
-    let rerun_window_indices = match policy.rerun_policy {
-        RerunPolicy::Disabled => Vec::new(),
-        RerunPolicy::FailedWindows { max_attempts } if max_attempts > 0 => unstable.clone(),
-        RerunPolicy::FailedWindows { .. } => Vec::new(),
-    };
+    let rerun_window_indices = select_rerun_windows(&unstable, policy.rerun_policy.as_ref());
 
     TemporalQcReport {
         windows: results,
         unstable_window_indices: unstable.clone(),
         rerun_window_indices,
         should_reject_run: policy.reject_if_unstable && !unstable.is_empty(),
+    }
+}
+
+pub fn select_rerun_windows(
+    unstable_window_indices: &[usize],
+    rerun_policy: Option<&RerunPolicy>,
+) -> Vec<usize> {
+    match rerun_policy {
+        Some(RerunPolicy::Disabled) | None => Vec::new(),
+        Some(RerunPolicy::FailedWindows { max_attempts }) if *max_attempts > 0 => {
+            unstable_window_indices.to_vec()
+        }
+        Some(RerunPolicy::FailedWindows { .. }) => Vec::new(),
     }
 }
 
@@ -206,12 +215,48 @@ mod tests {
                     max_ghosting_score: 0.45,
                     max_instability_score: 0.45,
                 },
-                rerun_policy: RerunPolicy::FailedWindows { max_attempts: 1 },
+                rerun_policy: Some(RerunPolicy::FailedWindows { max_attempts: 1 }),
             },
         );
 
         assert_eq!(report.unstable_window_indices, vec![1]);
         assert_eq!(report.rerun_window_indices, vec![1]);
         assert!(report.should_reject_run);
+    }
+
+    #[test]
+    fn qc_can_disable_rerun_policy_without_disabling_window_scoring() {
+        let windows = vec![TemporalWindow {
+            start_frame: 0,
+            end_frame_exclusive: 48,
+            anchor_frames: vec![0],
+        }];
+        let tiles = vec![WindowTileManifest {
+            window_index: 0,
+            start_frame: 0,
+            end_frame_exclusive: 48,
+            tile_size: 1024,
+            overlap: 0,
+            tiles: vec![],
+        }];
+
+        let report = evaluate_windows(
+            &windows,
+            &tiles,
+            &TemporalQcPolicy {
+                enabled: true,
+                reject_if_unstable: false,
+                thresholds: TemporalQcThresholds {
+                    max_flicker_score: 0.2,
+                    max_ghosting_score: 0.2,
+                    max_instability_score: 0.2,
+                },
+                rerun_policy: None,
+            },
+        );
+
+        assert_eq!(report.unstable_window_indices, vec![0]);
+        assert!(report.rerun_window_indices.is_empty());
+        assert!(!report.should_reject_run);
     }
 }

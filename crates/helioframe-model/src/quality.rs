@@ -45,7 +45,7 @@ pub struct TemporalQcPolicy {
     pub enabled: bool,
     pub reject_if_unstable: bool,
     pub thresholds: TemporalQcThresholds,
-    pub rerun_policy: RerunPolicy,
+    pub rerun_policy: Option<RerunPolicy>,
 }
 
 impl Default for TemporalQcPolicy {
@@ -54,7 +54,7 @@ impl Default for TemporalQcPolicy {
             enabled: true,
             reject_if_unstable: true,
             thresholds: TemporalQcThresholds::default(),
-            rerun_policy: RerunPolicy::default(),
+            rerun_policy: Some(RerunPolicy::default()),
         }
     }
 }

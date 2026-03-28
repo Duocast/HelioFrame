@@ -18,7 +18,7 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
-use crate::temporal_qc::evaluate_windows;
+use crate::temporal_qc::{evaluate_windows, select_rerun_windows};
 use crate::tiling::build_window_tile_manifests;
 use crate::windows::build_windows_and_batches;
 
@@ -414,7 +414,51 @@ impl PipelineOrchestrator {
                         reject_if_unstable: plan.preset.reject_on_temporal_regression,
                         ..TemporalQcPolicy::default()
                     };
-                    let qc_report = evaluate_windows(windows, tiles, &qc_policy);
+                    let mut qc_report = evaluate_windows(windows, tiles, &qc_policy);
+                    let max_attempts = match qc_policy.rerun_policy {
+                        Some(RerunPolicy::FailedWindows { max_attempts }) => max_attempts,
+                        _ => 0,
+                    };
+                    for _ in 0..max_attempts {
+                        let rerun_window_indices = select_rerun_windows(
+                            &qc_report.unstable_window_indices,
+                            qc_policy.rerun_policy.as_ref(),
+                        );
+                        if rerun_window_indices.is_empty() {
+                            break;
+                        }
+
+                        let decoded = decoded_frames.as_mut().ok_or_else(|| {
+                            helioframe_core::HelioFrameError::Config(
+                                "temporal-qc rerun requires decoded frames".to_string(),
+                            )
+                        })?;
+                        let failed_tile_jobs = tiles
+                            .iter()
+                            .filter(|tile| rerun_window_indices.contains(&tile.window_index))
+                            .cloned()
+                            .collect::<Vec<_>>();
+
+                        let worker_launch = WorkerLaunchConfig::new(
+                            &run_layout,
+                            &manifest,
+                            &decoded.frames_dir,
+                            decoded.frame_count,
+                            &failed_tile_jobs,
+                            backend.name(),
+                        );
+                        let worker_result = backend.worker_adapter().run(worker_launch)?;
+                        decoded.frames_dir = worker_result.output_frames_dir;
+                        decoded.frame_count = worker_result.frame_count;
+
+                        let next_report = evaluate_windows(windows, tiles, &qc_policy);
+                        if next_report.unstable_window_indices == qc_report.unstable_window_indices
+                        {
+                            qc_report = next_report;
+                            break;
+                        }
+                        qc_report = next_report;
+                    }
 
                     Self::write_stage_artifact(
                         &run_layout,
@@ -424,35 +468,6 @@ impl PipelineOrchestrator {
                     )?;
 
                     manifest.set_temporal_qc(Self::build_temporal_qc_manifest(&qc_report));
-
-                    if let RerunPolicy::FailedWindows { max_attempts } = qc_policy.rerun_policy {
-                        if max_attempts > 0 && !qc_report.rerun_window_indices.is_empty() {
-                            let decoded = decoded_frames.as_mut().ok_or_else(|| {
-                                helioframe_core::HelioFrameError::Config(
-                                    "temporal-qc rerun requires decoded frames".to_string(),
-                                )
-                            })?;
-                            let failed_tile_jobs = tiles
-                                .iter()
-                                .filter(|tile| {
-                                    qc_report.rerun_window_indices.contains(&tile.window_index)
-                                })
-                                .cloned()
-                                .collect::<Vec<_>>();
-
-                            let worker_launch = WorkerLaunchConfig::new(
-                                &run_layout,
-                                &manifest,
-                                &decoded.frames_dir,
-                                decoded.frame_count,
-                                &failed_tile_jobs,
-                                backend.name(),
-                            );
-                            let worker_result = backend.worker_adapter().run(worker_launch)?;
-                            decoded.frames_dir = worker_result.output_frames_dir;
-                            decoded.frame_count = worker_result.frame_count;
-                        }
-                    }
 
                     if qc_report.should_reject_run {
                         return Err(helioframe_core::HelioFrameError::Config(format!(
