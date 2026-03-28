@@ -199,6 +199,33 @@ fn default_backend_options(backend_kind: BackendKind) -> serde_json::Value {
             "guidance_scale": 7.5,
             "anchor_frame_stride": 4
         }),
+        BackendKind::HelioFrameMaster => serde_json::json!({
+            "teacher_model_path": "models/seedvr-teacher/seedvr_teacher_v1.0.0.ts",
+            "teacher_model_version": "seedvr-teacher-v1.0.0",
+            "teacher_weights_sha256": "c2c0d9ec5b0c8c1f8b03419e7f3e462f8ab7604f53f6ed15ec5122f7e14b8079",
+            "teacher_window_size": 12,
+            "teacher_overlap": 4,
+            "teacher_precision": "fp32",
+            "studio_model_path": "models/stcdit-studio/stcdit_studio_v1.0.0.ts",
+            "studio_model_version": "stcdit-studio-v1.0.0",
+            "studio_weights_sha256": "a7b3e1f0c4d29856e1a0f3b7c8d5e2a9f6b4c1d8e5a2f7b3c0d6e9a1f4b8c5d2",
+            "studio_window_size": 20,
+            "studio_overlap": 4,
+            "studio_precision": "fp16",
+            "diffusion_steps": 24,
+            "guidance_scale": 7.5,
+            "anchor_frame_stride": 3,
+            "refiner_model_path": "models/detail-refiner/detail_refiner_v1.0.0.ts",
+            "refiner_model_version": "detail-refiner-v1.0.0",
+            "refiner_weights_sha256": "b8d4f2a1e6c73950d2b1e4a8f7c3d6b9e5a2f8c1d7b4e0a3f6c9d2b5e8a1f4c7",
+            "refiner_refinement_steps": 6,
+            "refiner_refinement_strength": 0.4,
+            "refiner_precision": "fp16",
+            "device": "cuda",
+            "max_qc_reruns": 2,
+            "qc_max_flicker": 0.12,
+            "qc_max_shimmer": 0.08
+        }),
         _ => serde_json::json!({}),
     }
 }
