@@ -87,6 +87,7 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     .corner_radius(CornerRadius::same(6))
     .stroke(Stroke::NONE);
     ui.add(button)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Secondary outlined button.
@@ -100,6 +101,7 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     .corner_radius(CornerRadius::same(6))
     .stroke(Stroke::new(1.0, Palette::BORDER_LIGHT));
     ui.add(button)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A progress bar with animated fill.

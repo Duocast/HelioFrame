@@ -71,7 +71,8 @@ pub fn draw_settings_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.set_width(ui.available_width());
 
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut state.auto_open_output, "");
+                    ui.checkbox(&mut state.auto_open_output, "")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new("Auto-open output")
@@ -129,7 +130,7 @@ pub fn draw_settings_panel(ui: &mut egui::Ui, state: &mut AppState) {
                                 Palette::BORDER
                             },
                         ));
-                        if ui.add(btn).clicked() {
+                        if ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             state.log_level = level.to_string();
                         }
                     }

@@ -200,7 +200,11 @@ pub fn draw_upscale_panel(ui: &mut egui::Ui, state: &mut AppState) {
                             );
                         });
                     });
-                    if resp.interact(egui::Sense::click()).clicked() {
+                    let resp = resp.interact(egui::Sense::click());
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp.clicked() {
                         state.selected_preset = *preset;
                         state.selected_backend = None; // reset to preset default
                     }
@@ -266,7 +270,11 @@ pub fn draw_upscale_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         });
                     });
 
-                    if resp.response.interact(egui::Sense::click()).clicked() {
+                    let resp = resp.response.interact(egui::Sense::click());
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp.clicked() {
                         state.selected_backend = Some(*backend);
                     }
                     ui.add_space(2.0);
@@ -279,7 +287,8 @@ pub fn draw_upscale_panel(ui: &mut egui::Ui, state: &mut AppState) {
         widgets::section_heading(ui, "Launch");
 
         ui.horizontal(|ui| {
-            ui.checkbox(&mut state.dry_run, "");
+            ui.checkbox(&mut state.dry_run, "")
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
             ui.label(
                 RichText::new("Dry run")
                     .size(13.0)
