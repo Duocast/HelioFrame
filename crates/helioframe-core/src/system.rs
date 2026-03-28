@@ -34,22 +34,32 @@ impl DoctorSummary {
 pub fn run_doctor() -> DoctorSummary {
     let run_dir = detect_run_dir();
 
+    let python_names: &[&str] = if env::consts::OS == "windows" {
+        &["python", "python3"]
+    } else {
+        &["python3"]
+    };
+
     DoctorSummary {
-        platform_notice: "Linux/NVIDIA/SDR only",
+        platform_notice: if env::consts::OS == "windows" {
+            "Windows/NVIDIA/SDR only"
+        } else {
+            "Linux/NVIDIA/SDR only"
+        },
         checks: vec![
             command_check(
                 "ffmpeg",
-                "ffmpeg",
+                &["ffmpeg"],
                 "Install FFmpeg and ensure `ffmpeg` is available on PATH.",
             ),
             command_check(
                 "ffprobe",
-                "ffprobe",
+                &["ffprobe"],
                 "Install FFmpeg and ensure `ffprobe` is available on PATH.",
             ),
             command_check(
                 "python3",
-                "python3",
+                python_names,
                 "Install Python 3 and ensure `python3` is available on PATH.",
             ),
             gpu_check(),
@@ -67,31 +77,35 @@ pub fn run_doctor() -> DoctorSummary {
     }
 }
 
-fn command_check(name: &'static str, command: &str, action: &str) -> DoctorCheck {
-    if command_exists(command) {
-        DoctorCheck {
-            name,
-            passed: true,
-            detail: format!("`{command}` found on PATH"),
-            action: None,
+fn command_check(name: &'static str, commands: &[&str], action: &str) -> DoctorCheck {
+    for command in commands {
+        if command_exists(command) {
+            return DoctorCheck {
+                name,
+                passed: true,
+                detail: format!("`{command}` found on PATH"),
+                action: None,
+            };
         }
-    } else {
-        DoctorCheck {
-            name,
-            passed: false,
-            detail: format!("`{command}` not found on PATH"),
-            action: Some(action.to_string()),
-        }
+    }
+    let primary = commands[0];
+    DoctorCheck {
+        name,
+        passed: false,
+        detail: format!("`{primary}` not found on PATH"),
+        action: Some(action.to_string()),
     }
 }
 
 fn gpu_check() -> DoctorCheck {
-    if env::consts::OS != "linux" {
+    if env::consts::OS != "linux" && env::consts::OS != "windows" {
         return DoctorCheck {
             name: "gpu_visibility",
             passed: false,
             detail: format!("unsupported OS: {}", env::consts::OS),
-            action: Some("Run HelioFrame on Linux with NVIDIA drivers installed.".to_string()),
+            action: Some(
+                "Run HelioFrame on Linux or Windows with NVIDIA drivers installed.".to_string(),
+            ),
         };
     }
 
@@ -192,6 +206,12 @@ fn detect_run_dir() -> PathBuf {
     if let Ok(path) = env::var("HELIOFRAME_RUN_DIR") {
         return PathBuf::from(path);
     }
+    if env::consts::OS == "windows" {
+        if let Ok(path) = env::var("LOCALAPPDATA") {
+            return PathBuf::from(path).join("helioframe");
+        }
+        return env::temp_dir().join("helioframe");
+    }
     if let Ok(path) = env::var("XDG_RUNTIME_DIR") {
         return PathBuf::from(path).join("helioframe");
     }
@@ -200,9 +220,20 @@ fn detect_run_dir() -> PathBuf {
 
 fn command_exists(command: &str) -> bool {
     let paths = env::var_os("PATH").map(|raw| env::split_paths(&raw).collect::<Vec<_>>());
-    paths
-        .into_iter()
-        .flatten()
-        .map(|path| path.join(command))
-        .any(|candidate| candidate.is_file())
+    let dirs: Vec<_> = paths.into_iter().flatten().collect();
+
+    for dir in &dirs {
+        if dir.join(command).is_file() {
+            return true;
+        }
+        if env::consts::OS == "windows" {
+            for ext in &["exe", "cmd", "bat"] {
+                let with_ext = format!("{command}.{ext}");
+                if dir.join(&with_ext).is_file() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
