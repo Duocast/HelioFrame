@@ -7,6 +7,83 @@ use std::{
     process::Command,
 };
 
+/// Describes the set of NVENC encoders available on this system via FFmpeg.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct NvencCapabilities {
+    pub h264_nvenc: bool,
+    pub hevc_nvenc: bool,
+    pub av1_nvenc: bool,
+    /// Human-readable summary for diagnostics.
+    pub detail: String,
+}
+
+impl NvencCapabilities {
+    /// Returns `true` when at least one NVENC encoder is available.
+    pub fn any_available(&self) -> bool {
+        self.h264_nvenc || self.hevc_nvenc || self.av1_nvenc
+    }
+}
+
+/// Probe FFmpeg for NVENC encoder support.
+///
+/// Runs `ffmpeg -hide_banner -encoders` and checks for the presence of
+/// `h264_nvenc`, `hevc_nvenc`, and `av1_nvenc` in the output.
+pub fn detect_nvenc_capabilities() -> NvencCapabilities {
+    let output = Command::new("ffmpeg")
+        .arg("-hide_banner")
+        .arg("-encoders")
+        .output();
+
+    let stdout = match output {
+        Ok(result) if result.status.success() => {
+            String::from_utf8_lossy(&result.stdout).to_string()
+        }
+        Ok(result) => {
+            return NvencCapabilities {
+                detail: format!(
+                    "ffmpeg -encoders failed with status {}",
+                    result.status
+                ),
+                ..Default::default()
+            };
+        }
+        Err(err) => {
+            return NvencCapabilities {
+                detail: format!("failed to run ffmpeg -encoders: {err}"),
+                ..Default::default()
+            };
+        }
+    };
+
+    let h264 = stdout.contains("h264_nvenc");
+    let hevc = stdout.contains("hevc_nvenc");
+    let av1 = stdout.contains("av1_nvenc");
+
+    let mut available = Vec::new();
+    if h264 {
+        available.push("h264_nvenc");
+    }
+    if hevc {
+        available.push("hevc_nvenc");
+    }
+    if av1 {
+        available.push("av1_nvenc");
+    }
+
+    let detail = if available.is_empty() {
+        "no NVENC encoders detected in FFmpeg".to_string()
+    } else {
+        format!("NVENC encoders available: {}", available.join(", "))
+    };
+
+    NvencCapabilities {
+        h264_nvenc: h264,
+        hevc_nvenc: hevc,
+        av1_nvenc: av1,
+        detail,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DoctorCheck {
     pub name: &'static str,
@@ -53,6 +130,7 @@ pub fn run_doctor() -> DoctorSummary {
                 "Install Python 3 and ensure `python3` is available on PATH.",
             ),
             gpu_check(),
+            nvenc_check(),
             writable_dir_check(
                 "temp_dir_writable",
                 &env::temp_dir(),
@@ -64,6 +142,28 @@ pub fn run_doctor() -> DoctorSummary {
                 "Set HELIOFRAME_RUN_DIR (or XDG_RUNTIME_DIR) to a writable directory for runtime files.",
             ),
         ],
+    }
+}
+
+fn nvenc_check() -> DoctorCheck {
+    let caps = detect_nvenc_capabilities();
+    if caps.any_available() {
+        DoctorCheck {
+            name: "nvenc_encoders",
+            passed: true,
+            detail: caps.detail,
+            action: None,
+        }
+    } else {
+        DoctorCheck {
+            name: "nvenc_encoders",
+            passed: false,
+            detail: caps.detail,
+            action: Some(
+                "Install FFmpeg built with --enable-nvenc and ensure NVIDIA drivers are loaded."
+                    .to_string(),
+            ),
+        }
     }
 }
 

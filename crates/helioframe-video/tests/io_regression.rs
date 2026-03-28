@@ -118,6 +118,11 @@ fn decode_encode_roundtrip_outputs_exist_and_satisfy_baseline_metadata() {
             enable_mild_denoise: false,
             resize_filter: "lanczos",
             sharpen_amount: None,
+            codec: Some(helioframe_video::VideoCodec::H264),
+            nvenc_preset: helioframe_video::NvencPreset::default(),
+            quality: None,
+            gpu_index: None,
+            allow_10bit: false,
         };
 
         let encoded =

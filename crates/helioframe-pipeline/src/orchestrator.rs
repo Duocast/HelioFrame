@@ -13,8 +13,8 @@ use helioframe_model::{
     WorkerLaunchConfig,
 };
 use helioframe_video::{
-    decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
-    VideoProbe,
+    auto_detect_codec, decode_to_frame_directory, encode_from_frame_directory, probe_input,
+    DecodePlan, EncodePlan, NvencPreset, VideoProbe,
 };
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
@@ -205,6 +205,10 @@ impl PipelineOrchestrator {
             ]);
         }
 
+        // Detect NVENC at plan time so the user gets early feedback about
+        // which encoder will be used.
+        let (detected_codec, _nvenc_caps) = auto_detect_codec();
+
         Ok(ExecutionPlan {
             probe,
             preset,
@@ -217,6 +221,11 @@ impl PipelineOrchestrator {
                 enable_mild_denoise: execution_profile.enable_mild_denoise,
                 resize_filter: execution_profile.resize_filter,
                 sharpen_amount: execution_profile.sharpen_amount,
+                codec: Some(detected_codec),
+                nvenc_preset: NvencPreset::default(),
+                quality: None,
+                gpu_index: None,
+                allow_10bit: false,
             },
             inference,
             stages,
