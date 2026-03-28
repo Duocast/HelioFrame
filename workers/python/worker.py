@@ -37,6 +37,7 @@ class InputManifest:
     output_frames_dir: Path
     output_manifest_path: Path
     frames: list[FrameEntry]
+    windows: list[dict[str, Any]] | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,6 +107,11 @@ def load_input_manifest(path: Path) -> InputManifest:
     if not isinstance(backend_options, dict):
         raise ValueError("manifest field `backend_options` must be an object")
 
+    raw_windows = payload.get("windows")
+    parsed_windows: list[dict[str, Any]] | None = None
+    if isinstance(raw_windows, list) and raw_windows:
+        parsed_windows = raw_windows
+
     return InputManifest(
         schema_version=schema_version,
         run_id=_require_string(payload, "run_id"),
@@ -118,6 +124,7 @@ def load_input_manifest(path: Path) -> InputManifest:
         if isinstance(output_manifest, str) and output_manifest.strip()
         else default_output_manifest,
         frames=parsed_frames,
+        windows=parsed_windows,
     )
 
 
@@ -232,6 +239,7 @@ def _run_detail_refiner(manifest: InputManifest) -> tuple[list[dict[str, Any]], 
         refinement_steps=int(options.get("refinement_steps", 6)),
         refinement_strength=float(options.get("refinement_strength", 0.4)),
         hf_energy_threshold=float(options.get("hf_energy_threshold", 0.25)),
+        min_window_hf_ratio=float(options.get("min_window_hf_ratio", 0.10)),
         max_hf_flicker=float(options.get("max_hf_flicker", 0.12)),
         max_patch_shimmer=float(options.get("max_patch_shimmer", 0.08)),
         categories=options.get("categories"),

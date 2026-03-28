@@ -57,6 +57,7 @@ DEFAULT_MODEL_PATH = "models/detail-refiner/detail_refiner_v1.0.0.ts"
 DEFAULT_REFINEMENT_STEPS = 6
 DEFAULT_REFINEMENT_STRENGTH = 0.4
 DEFAULT_HF_ENERGY_THRESHOLD = 0.25
+DEFAULT_MIN_WINDOW_HF_RATIO = 0.10
 DEFAULT_MAX_HF_FLICKER = 0.12
 DEFAULT_MAX_PATCH_SHIMMER = 0.08
 
@@ -97,6 +98,7 @@ class DetailRefinerBackend:
         refinement_steps: int = DEFAULT_REFINEMENT_STEPS,
         refinement_strength: float = DEFAULT_REFINEMENT_STRENGTH,
         hf_energy_threshold: float = DEFAULT_HF_ENERGY_THRESHOLD,
+        min_window_hf_ratio: float = DEFAULT_MIN_WINDOW_HF_RATIO,
         max_hf_flicker: float = DEFAULT_MAX_HF_FLICKER,
         max_patch_shimmer: float = DEFAULT_MAX_PATCH_SHIMMER,
         categories: list[str] | None = None,
@@ -109,6 +111,8 @@ class DetailRefinerBackend:
             raise ValueError("refinement_strength must be in (0.0, 1.0]")
         if not (0.0 <= hf_energy_threshold <= 1.0):
             raise ValueError("hf_energy_threshold must be in [0.0, 1.0]")
+        if not (0.0 <= min_window_hf_ratio <= 1.0):
+            raise ValueError("min_window_hf_ratio must be in [0.0, 1.0]")
         if patch_size <= 0:
             raise ValueError("patch_size must be positive")
         if model_version != PINNED_MODEL_VERSION:
@@ -133,6 +137,7 @@ class DetailRefinerBackend:
         self.refinement_steps = refinement_steps
         self.refinement_strength = refinement_strength
         self.hf_energy_threshold = hf_energy_threshold
+        self.min_window_hf_ratio = min_window_hf_ratio
         self.max_hf_flicker = max_hf_flicker
         self.max_patch_shimmer = max_patch_shimmer
         self.categories = sorted(resolved_categories)
@@ -403,6 +408,73 @@ class DetailRefinerBackend:
         return output
 
     # ------------------------------------------------------------------
+    # Window-level helpers
+    # ------------------------------------------------------------------
+
+    def _find_qualifying_patches_for_frames(
+        self,
+        frame_tensors: list[torch.Tensor],
+        height: int,
+        width: int,
+    ) -> set[tuple[int, int]]:
+        """Identify patches with sufficient HF energy and matching categories."""
+        requested_cats = set(self.categories)
+        ps = self.patch_size
+        qualifying: set[tuple[int, int]] = set()
+        for tensor in frame_tensors:
+            energy_map = self._laplacian_energy(tensor)
+            candidates = self._patch_hf_energies(energy_map, height, width)
+            for py, px, _e in candidates:
+                patch = tensor[:, py : min(py + ps, height), px : min(px + ps, width)]
+                cats = self._classify_patch_category(patch)
+                if cats & requested_cats:
+                    qualifying.add((py, px))
+        return qualifying
+
+    def _total_patch_count(self, height: int, width: int) -> int:
+        """Count total non-overlapping patches that tile the frame."""
+        ps = self.patch_size
+        cols = max(1, (width + ps - 1) // ps)
+        rows = max(1, (height + ps - 1) // ps)
+        return rows * cols
+
+    def _refine_patches_in_place(
+        self,
+        frame_tensors: list[torch.Tensor],
+        refined_tensors: list[torch.Tensor],
+        qualifying_patches: set[tuple[int, int]],
+        height: int,
+        width: int,
+    ) -> int:
+        """Refine qualifying patches and blend into refined_tensors. Returns count."""
+        ps = self.patch_size
+        total = len(frame_tensors)
+        patches_refined = 0
+
+        for py, px in sorted(qualifying_patches):
+            y_end = min(py + ps, height)
+            x_end = min(px + ps, width)
+
+            patch_stack = torch.stack(
+                [t[:, py:y_end, px:x_end] for t in frame_tensors], dim=0
+            )
+
+            refined_patch = self._refine_patch(patch_stack)
+
+            alpha = self.refinement_strength
+            for t_idx in range(total):
+                original_region = refined_tensors[t_idx][:, py:y_end, px:x_end]
+                blended = (
+                    alpha * refined_patch[t_idx].float().cpu()
+                    + (1.0 - alpha) * original_region
+                )
+                refined_tensors[t_idx][:, py:y_end, px:x_end] = blended
+
+            patches_refined += 1
+
+        return patches_refined
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
@@ -424,58 +496,108 @@ class DetailRefinerBackend:
             raise ValueError("detail refiner received an empty frame list")
 
         _, height, width = frame_tensors[0].shape
-        requested_cats = set(self.categories)
-        ps = self.patch_size
+        total_patch_count = self._total_patch_count(height, width)
 
-        # ------- per-frame: identify qualifying patches -------
-        # A patch qualifies if it has enough HF energy AND matches at
-        # least one requested category.
-        qualifying_patches: set[tuple[int, int]] = set()
-        for tensor in frame_tensors:
-            energy_map = self._laplacian_energy(tensor)
-            candidates = self._patch_hf_energies(energy_map, height, width)
-            for py, px, _e in candidates:
-                patch = tensor[:, py : min(py + ps, height), px : min(px + ps, width)]
-                cats = self._classify_patch_category(patch)
-                if cats & requested_cats:
-                    qualifying_patches.add((py, px))
+        # Build temporal windows from the manifest.  When the orchestrator
+        # provides explicit window ranges the refiner processes each window
+        # independently so that (a) windows with insufficient HF content
+        # are skipped entirely and (b) the sparkle guard is evaluated
+        # per-window — a sparkle failure rolls back only the offending
+        # window instead of the entire clip.
+        raw_windows = getattr(manifest, "windows", None)
+        if raw_windows is None:
+            # Legacy / flat invocation: parse from the raw JSON payload
+            # that the worker may have attached as a dict attribute.
+            raw_windows = getattr(manifest, "_raw", {}).get("windows")
 
-        # ------- refine qualifying patches across all frames -------
-        # Build temporal patch stacks and refine them in one shot.
+        if raw_windows and isinstance(raw_windows, list):
+            windows = [
+                (int(w["start_frame"]), int(w["end_frame_exclusive"]))
+                for w in raw_windows
+            ]
+        else:
+            # Fallback: treat the entire frame list as a single window.
+            windows = [(0, total)]
+
+        # Refined tensors start as clones of the originals; each window
+        # may update its slice independently.
         refined_tensors = [t.clone() for t in frame_tensors]
-        patches_refined = 0
 
-        for py, px in sorted(qualifying_patches):
-            y_end = min(py + ps, height)
-            x_end = min(px + ps, width)
+        total_patches_refined = 0
+        total_qualifying_patches = 0
+        windows_refined = 0
+        windows_skipped_low_hf = 0
+        windows_rolled_back = 0
+        per_window_reports: list[dict[str, Any]] = []
 
-            # Stack [T, C, pH, pW]
-            patch_stack = torch.stack(
-                [t[:, py:y_end, px:x_end] for t in frame_tensors], dim=0
+        for win_start, win_end in windows:
+            win_end = min(win_end, total)
+            if win_start >= win_end:
+                continue
+
+            win_frames = frame_tensors[win_start:win_end]
+
+            # --- HF pre-screening: skip windows without enough HF content ---
+            qualifying = self._find_qualifying_patches_for_frames(
+                win_frames, height, width,
+            )
+            total_qualifying_patches += len(qualifying)
+
+            hf_ratio = len(qualifying) / max(total_patch_count, 1)
+            if hf_ratio < self.min_window_hf_ratio:
+                windows_skipped_low_hf += 1
+                per_window_reports.append({
+                    "start_frame": win_start,
+                    "end_frame_exclusive": win_end,
+                    "status": "skipped_low_hf",
+                    "hf_ratio": round(hf_ratio, 4),
+                    "qualifying_patches": len(qualifying),
+                    "total_patches": total_patch_count,
+                })
+                continue
+
+            # --- refine qualifying patches for this window ---
+            win_refined = [t.clone() for t in win_frames]
+            patches_refined = self._refine_patches_in_place(
+                win_frames, win_refined, qualifying, height, width,
+            )
+            total_patches_refined += patches_refined
+
+            # --- per-window sparkle guard ---
+            sparkle_passed, hf_flicker, patch_shimmer = self._check_sparkle(
+                win_frames, win_refined,
             )
 
-            refined_patch = self._refine_patch(patch_stack)
-
-            # Blend back with strength-weighted alpha to soften transitions.
-            alpha = self.refinement_strength
-            for t_idx in range(total):
-                original_region = refined_tensors[t_idx][:, py:y_end, px:x_end]
-                blended = (
-                    alpha * refined_patch[t_idx].float().cpu()
-                    + (1.0 - alpha) * original_region
-                )
-                refined_tensors[t_idx][:, py:y_end, px:x_end] = blended
-
-            patches_refined += 1
-
-        # ------- sparkle guard -------
-        sparkle_passed, hf_flicker, patch_shimmer = self._check_sparkle(
-            frame_tensors, refined_tensors
-        )
-
-        if not sparkle_passed:
-            # Roll back to pre-refinement frames.
-            refined_tensors = frame_tensors
+            if sparkle_passed:
+                # Commit refined frames for this window.
+                for i, t_idx in enumerate(range(win_start, win_end)):
+                    refined_tensors[t_idx] = win_refined[i]
+                windows_refined += 1
+                per_window_reports.append({
+                    "start_frame": win_start,
+                    "end_frame_exclusive": win_end,
+                    "status": "refined",
+                    "hf_ratio": round(hf_ratio, 4),
+                    "qualifying_patches": len(qualifying),
+                    "patches_refined": patches_refined,
+                    "sparkle_guard_passed": True,
+                    "hf_flicker": round(hf_flicker, 6),
+                    "patch_shimmer": round(patch_shimmer, 6),
+                })
+            else:
+                # Roll back — keep original frames for this window.
+                windows_rolled_back += 1
+                per_window_reports.append({
+                    "start_frame": win_start,
+                    "end_frame_exclusive": win_end,
+                    "status": "rolled_back",
+                    "hf_ratio": round(hf_ratio, 4),
+                    "qualifying_patches": len(qualifying),
+                    "patches_refined": patches_refined,
+                    "sparkle_guard_passed": False,
+                    "hf_flicker": round(hf_flicker, 6),
+                    "patch_shimmer": round(patch_shimmer, 6),
+                })
 
         # ------- write output -------
         written: list[RefinerFrameResult] = []
@@ -503,14 +625,17 @@ class DetailRefinerBackend:
             "refinement_steps": self.refinement_steps,
             "refinement_strength": self.refinement_strength,
             "hf_energy_threshold": self.hf_energy_threshold,
+            "min_window_hf_ratio": self.min_window_hf_ratio,
             "categories": self.categories,
             "patch_size": self.patch_size,
             "precision": "fp16" if self.use_half else "fp32",
-            "qualifying_patches": len(qualifying_patches),
-            "patches_refined": patches_refined,
-            "sparkle_guard_passed": sparkle_passed,
-            "hf_flicker": round(hf_flicker, 6),
-            "patch_shimmer": round(patch_shimmer, 6),
+            "total_windows": len(windows),
+            "windows_refined": windows_refined,
+            "windows_skipped_low_hf": windows_skipped_low_hf,
+            "windows_rolled_back": windows_rolled_back,
+            "qualifying_patches": total_qualifying_patches,
+            "patches_refined": total_patches_refined,
+            "per_window_reports": per_window_reports,
         }
 
         return written, backend_meta
