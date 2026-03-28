@@ -52,7 +52,8 @@ impl PresetConfig {
     ///
     /// Tries the following locations in order:
     /// 1. Next to the running executable (e.g. `<exe_dir>/configs/presets/<name>.toml`)
-    /// 2. Relative to the current working directory
+    /// 2. Ancestor directories of the executable (handles `target/release/` layouts)
+    /// 3. Relative to the current working directory
     pub fn resolve_preset_path(preset: UpscalePreset) -> PathBuf {
         let filename = match preset {
             UpscalePreset::Preview => "preview.toml",
@@ -63,13 +64,17 @@ impl PresetConfig {
 
         let relative = Path::new("configs").join("presets").join(filename);
 
-        // Try resolving relative to the executable's directory first.
+        // Try resolving relative to the executable's directory and its ancestors.
+        // This handles common layouts where the binary lives in a subdirectory
+        // (e.g. `target/release/`) while `configs/` sits at the project root.
         if let Ok(exe) = std::env::current_exe() {
-            if let Some(exe_dir) = exe.parent() {
-                let candidate = exe_dir.join(&relative);
+            let mut dir = exe.parent();
+            while let Some(ancestor) = dir {
+                let candidate = ancestor.join(&relative);
                 if candidate.exists() {
                     return candidate;
                 }
+                dir = ancestor.parent();
             }
         }
 
