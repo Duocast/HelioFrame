@@ -494,10 +494,11 @@ impl PipelineOrchestrator {
                         ))
                     })?;
 
-                    let worker_script = helioframe_model::resolve_worker_script();
+                    let (worker_script, project_root) = helioframe_model::resolve_worker_script();
                     let mut cmd = std::process::Command::new(helioframe_model::python_exe());
                     cmd.arg(&worker_script)
                         .arg(&refine_input_manifest_path)
+                        .current_dir(&project_root)
                         .stderr(std::process::Stdio::piped());
                     helioframe_model::apply_platform_flags(&mut cmd);
                     let mut child = cmd.spawn().map_err(|err| {
@@ -1000,10 +1001,11 @@ impl PipelineOrchestrator {
                         ))
                     })?;
 
-                    let worker_script = helioframe_model::resolve_worker_script();
+                    let (worker_script, project_root) = helioframe_model::resolve_worker_script();
                     let mut cmd = std::process::Command::new(helioframe_model::python_exe());
                     cmd.arg(&worker_script)
                         .arg(&refine_input_manifest_path)
+                        .current_dir(&project_root)
                         .stderr(std::process::Stdio::piped());
                     helioframe_model::apply_platform_flags(&mut cmd);
                     let mut child = cmd.spawn().map_err(|err| {

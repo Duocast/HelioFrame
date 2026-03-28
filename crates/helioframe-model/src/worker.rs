@@ -24,25 +24,32 @@ pub fn python_exe() -> &'static str {
     }
 }
 
-/// Resolves the absolute path to the Python worker script.
+/// Resolves the absolute path to the Python worker script and the project
+/// root directory it lives in.
 ///
 /// Walks up from the executable's directory (handling layouts like
 /// `target/release/`) to find `workers/python/worker.py`, mirroring the
 /// strategy used by [`PresetConfig::resolve_preset_path`].  Falls back to
-/// the relative path if the executable location cannot be determined.
-pub fn resolve_worker_script() -> PathBuf {
+/// the relative path and current directory if the executable location
+/// cannot be determined.
+///
+/// Returns `(worker_script_path, project_root)`.
+pub fn resolve_worker_script() -> (PathBuf, PathBuf) {
     let relative = Path::new(WORKER_SCRIPT_RELATIVE);
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent();
         while let Some(ancestor) = dir {
             let candidate = ancestor.join(relative);
             if candidate.exists() {
-                return candidate;
+                return (candidate, ancestor.to_path_buf());
             }
             dir = ancestor.parent();
         }
     }
-    relative.to_path_buf()
+    (
+        relative.to_path_buf(),
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    )
 }
 
 /// Applies Windows-specific process creation flags to hide the console
@@ -171,17 +178,19 @@ fn run_python_worker(
         ))
     })?;
 
-    let worker_script = resolve_worker_script();
+    let (worker_script, project_root) = resolve_worker_script();
     let mut cmd = Command::new(python_exe());
     cmd.arg(&worker_script)
         .arg(&input_manifest_path)
+        .current_dir(&project_root)
         .stderr(Stdio::piped());
     apply_platform_flags(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|err| {
         helioframe_core::HelioFrameError::Config(format!(
-            "failed to launch python worker (script={}, python={}): {err}",
+            "failed to launch python worker (script={}, cwd={}, python={}): {err}",
             worker_script.display(),
+            project_root.display(),
             python_exe(),
         ))
     })?;
