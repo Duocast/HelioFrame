@@ -22,6 +22,33 @@ pub struct StageTiming {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalQcSummary {
+    pub total_windows: usize,
+    pub unstable_windows: usize,
+    pub rerun_scheduled_windows: usize,
+    pub reject_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalQcWindowStatus {
+    pub window_index: usize,
+    pub start_frame: usize,
+    pub end_frame_exclusive: usize,
+    pub flicker_score: f64,
+    pub ghosting_score: f64,
+    pub instability_score: f64,
+    pub unstable: bool,
+    pub rerun_scheduled: bool,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalQcManifest {
+    pub summary: TemporalQcSummary,
+    pub windows: Vec<TemporalQcWindowStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunManifest {
     pub run_id: String,
     pub input: String,
@@ -31,6 +58,7 @@ pub struct RunManifest {
     pub probe: RunProbeInfo,
     pub windows: Vec<TemporalWindow>,
     pub window_tiles: Vec<WindowTileManifest>,
+    pub temporal_qc: Option<TemporalQcManifest>,
     pub stage_timings: Vec<StageTiming>,
 }
 
@@ -45,6 +73,7 @@ impl RunManifest {
             probe,
             windows: Vec::new(),
             window_tiles: Vec::new(),
+            temporal_qc: None,
             stage_timings: vec![StageTiming {
                 stage: "preset".into(),
                 elapsed_ms: 0,
@@ -58,6 +87,10 @@ impl RunManifest {
 
     pub fn set_window_tiles(&mut self, window_tiles: Vec<WindowTileManifest>) {
         self.window_tiles = window_tiles;
+    }
+
+    pub fn set_temporal_qc(&mut self, temporal_qc: TemporalQcManifest) {
+        self.temporal_qc = Some(temporal_qc);
     }
 
     pub fn append_stage_timing(&mut self, stage: impl Into<String>, elapsed: Duration) {
