@@ -10,11 +10,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
-authors = ["OpenAI"]
-license = "MIT"
-repository = "https://example.invalid/helioframe"
+authors = ["Overdose"]
 
 [workspace.dependencies]
 anyhow = "1.0"
