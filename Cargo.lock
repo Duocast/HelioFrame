@@ -1438,6 +1438,7 @@ dependencies = [
  "egui_extras",
  "helioframe-core",
  "helioframe-pipeline",
+ "image",
  "rfd",
  "serde",
  "serde_json",

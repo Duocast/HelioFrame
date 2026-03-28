@@ -1,6 +1,12 @@
-# HelioFrame
+<p align="center">
+  <img src="assets/logo.png" alt="HelioFrame Logo" width="200" />
+</p>
 
-A Rust-first research scaffold for a quality-first 4K video upscaling application.
+<h1 align="center">HelioFrame</h1>
+
+<p align="center">
+  A Rust-first research scaffold for a quality-first 4K video upscaling application.
+</p>
 
 ## Positioning
 

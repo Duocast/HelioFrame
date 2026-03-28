@@ -101,7 +101,7 @@ pub fn draw_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
             )
             .clicked()
         {
-            state.show_about = !state.show_about;
+            state.active_panel = ActivePanel::About;
         }
     });
 }
