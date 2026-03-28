@@ -39,6 +39,7 @@ fn detect_boundaries_with_ffmpeg(
 ) -> HelioFrameResult<Vec<SceneBoundary>> {
     let filter = format!("scdet=threshold={threshold},metadata=print:file=-");
     let output = Command::new("ffmpeg")
+        .env("LC_ALL", "C")
         .arg("-v")
         .arg("error")
         .arg("-i")

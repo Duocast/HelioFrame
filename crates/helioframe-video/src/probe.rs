@@ -105,6 +105,7 @@ pub fn probe_input(path: &Path) -> HelioFrameResult<VideoProbe> {
 
 fn run_ffprobe(path: &Path) -> HelioFrameResult<FfprobeOutput> {
     let output = Command::new("ffprobe")
+        .env("LC_ALL", "C")
         .arg("-v")
         .arg("error")
         .arg("-show_streams")
