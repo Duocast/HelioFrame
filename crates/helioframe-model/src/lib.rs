@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod onnx;
 pub mod plan;
 pub mod quality;
 pub mod traits;
