@@ -1,7 +1,8 @@
 use std::{
     fs,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus},
+    process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 
@@ -96,13 +97,27 @@ struct WorkerOutputManifest {
     output_frames_dir: String,
 }
 
+/// Optional callback that receives each line of subprocess output in real time.
+pub type WorkerOutputCallback = Box<dyn Fn(&str, bool) + Send + Sync>;
+
 impl WorkerAdapter {
     pub fn run(
         self,
         config: WorkerLaunchConfig<'_>,
     ) -> helioframe_core::HelioFrameResult<WorkerRunResult> {
+        self.run_with_output(config, None)
+    }
+
+    /// Run the worker, forwarding stdout/stderr lines through `on_output`.
+    ///
+    /// The callback receives `(line, is_stderr)`.
+    pub fn run_with_output(
+        self,
+        config: WorkerLaunchConfig<'_>,
+        on_output: Option<WorkerOutputCallback>,
+    ) -> helioframe_core::HelioFrameResult<WorkerRunResult> {
         match self {
-            Self::PythonProcess => run_python_worker(config),
+            Self::PythonProcess => run_python_worker(config, on_output),
             Self::OnnxRuntime => crate::onnx::run_onnx_inference(&config, None),
         }
     }
@@ -110,6 +125,7 @@ impl WorkerAdapter {
 
 fn run_python_worker(
     config: WorkerLaunchConfig<'_>,
+    on_output: Option<WorkerOutputCallback>,
 ) -> helioframe_core::HelioFrameResult<WorkerRunResult> {
     let worker_io_dir = config.run_layout.intermediate_artifacts_dir.join("worker");
     fs::create_dir_all(&worker_io_dir).map_err(|err| {
@@ -140,6 +156,8 @@ fn run_python_worker(
     let mut child = Command::new(python_exe())
         .arg("workers/python/worker.py")
         .arg(&input_manifest_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
             helioframe_core::HelioFrameError::Config(format!(
@@ -147,11 +165,81 @@ fn run_python_worker(
             ))
         })?;
 
-    wait_for_child_with_timeout(&mut child, config.worker_timeout, "python worker")?;
+    // Drain stdout and stderr in background threads so the pipe buffers never
+    // fill up and block the child process.
+    let captured_stderr = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let captured_stdout = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+    let stdout_handle = child.stdout.take().map(|pipe| {
+        let captured = captured_stdout.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    captured.lock().unwrap().push(line);
+                }
+            }
+        })
+    });
+
+    let stderr_handle = child.stderr.take().map(|pipe| {
+        let captured = captured_stderr.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    captured.lock().unwrap().push(line);
+                }
+            }
+        })
+    });
+
+    let status = wait_for_child_with_timeout(&mut child, config.worker_timeout, "python worker");
+
+    // Wait for reader threads to finish draining.
+    if let Some(h) = stdout_handle {
+        let _ = h.join();
+    }
+    if let Some(h) = stderr_handle {
+        let _ = h.join();
+    }
+
+    // Forward captured output to the callback.
+    if let Some(ref cb) = on_output {
+        for line in captured_stdout.lock().unwrap().iter() {
+            cb(line, false);
+        }
+        for line in captured_stderr.lock().unwrap().iter() {
+            cb(line, true);
+        }
+    }
+
+    // If the process failed, include stderr in the error message.
+    if let Err(mut err) = status {
+        let stderr_lines = captured_stderr.lock().unwrap();
+        if !stderr_lines.is_empty() {
+            let detail = stderr_lines.join("\n");
+            let truncated = if detail.len() > 2000 {
+                format!("...{}", &detail[detail.len() - 2000..])
+            } else {
+                detail
+            };
+            err = helioframe_core::HelioFrameError::Config(format!(
+                "{err}\n--- worker stderr ---\n{truncated}"
+            ));
+        }
+        return Err(err);
+    }
 
     let raw_output = fs::read_to_string(&output_manifest_path).map_err(|err| {
+        let stderr_lines = captured_stderr.lock().unwrap();
+        let stderr_context = if stderr_lines.is_empty() {
+            String::new()
+        } else {
+            format!("\n--- worker stderr ---\n{}", stderr_lines.join("\n"))
+        };
         helioframe_core::HelioFrameError::Config(format!(
-            "python worker did not produce output manifest {}: {err}",
+            "python worker did not produce output manifest {}: {err}{stderr_context}",
             output_manifest_path.display()
         ))
     })?;

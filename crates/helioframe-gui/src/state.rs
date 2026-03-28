@@ -61,13 +61,32 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
+    Debug,
     Info,
     Warn,
     Error,
-    Debug,
+}
+
+/// Controls which logs are visible in the GUI console.
+#[derive(Debug, Clone)]
+pub struct LogFilterState {
+    pub min_level: LogLevel,
+    pub search_text: String,
+    pub auto_scroll: bool,
+    pub show_timestamps: bool,
+}
+
+impl Default for LogFilterState {
+    fn default() -> Self {
+        Self {
+            min_level: LogLevel::Debug,
+            search_text: String::new(),
+            auto_scroll: true,
+            show_timestamps: true,
+        }
+    }
 }
 
 impl Default for PipelineState {
@@ -151,6 +170,7 @@ pub struct AppState {
 
     // UI state
     pub file_drop_hover: bool,
+    pub log_filter: LogFilterState,
 }
 
 impl Default for AppState {
@@ -170,6 +190,7 @@ impl Default for AppState {
             auto_open_output: false,
             log_level: "info".into(),
             file_drop_hover: false,
+            log_filter: LogFilterState::default(),
         }
     }
 }
