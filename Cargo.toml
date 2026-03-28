@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/helioframe-cli",
     "crates/helioframe-core",
+    "crates/helioframe-gui",
     "crates/helioframe-model",
     "crates/helioframe-pipeline",
     "crates/helioframe-video",

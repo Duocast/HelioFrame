@@ -1,0 +1,22 @@
+[package]
+name = "helioframe-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "helioframe-gui"
+path = "src/main.rs"
+
+[dependencies]
+helioframe-core = { path = "../helioframe-core" }
+helioframe-pipeline = { path = "../helioframe-pipeline" }
+eframe = { version = "0.34.1", default-features = true }
+egui = "0.34.1"
+egui_extras = { version = "0.34.1", features = ["image"] }
+rfd = "0.15"
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
