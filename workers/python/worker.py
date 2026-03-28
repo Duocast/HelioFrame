@@ -96,7 +96,9 @@ def load_input_manifest(path: Path) -> InputManifest:
     output_manifest = payload.get("output_manifest_path")
     default_output_manifest = path.parent / "worker-output-manifest.json"
 
-    backend = payload.get("backend", "passthrough")
+    backend = payload.get("backend")
+    if backend is None:
+        backend = payload.get("backend_name", "passthrough")
     if not isinstance(backend, str) or not backend.strip():
         raise ValueError("manifest field `backend` must be a non-empty string when provided")
 
@@ -172,6 +174,43 @@ def _run_realbasicvsr(manifest: InputManifest) -> tuple[list[dict[str, Any]], di
     return output_frames, backend_meta
 
 
+
+def _run_seedvr_teacher(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    options = manifest.backend_options
+    model_path = Path(options.get("model_path", "models/seedvr-teacher/seedvr_teacher_v1.0.0.ts"))
+    if not model_path.is_absolute():
+        model_path = Path.cwd() / model_path
+
+    from backends import SeedVRTeacherBackend
+
+    backend = SeedVRTeacherBackend(
+        model_path=model_path,
+        model_version=str(options.get("model_version", "seedvr-teacher-v1.0.0")),
+        expected_weights_sha256=str(
+            options.get(
+                "weights_sha256",
+                "c2c0d9ec5b0c8c1f8b03419e7f3e462f8ab7604f53f6ed15ec5122f7e14b8079",
+            )
+        ),
+        device=str(options.get("device", "cuda")),
+        window_size=int(options.get("window_size", 12)),
+        overlap=int(options.get("overlap", 4)),
+        precision=str(options.get("precision", "fp32")),
+        offline_only=bool(options.get("offline_only", True)),
+    )
+
+    written, backend_meta = backend.run(manifest, sha256_fn=_sha256)
+    output_frames = [
+        {
+            "index": frame.index,
+            "file_name": frame.file_name,
+            "source_sha256": frame.source_sha256,
+            "output_sha256": frame.output_sha256,
+        }
+        for frame in written
+    ]
+    return output_frames, backend_meta
+
 def run_worker(manifest: InputManifest) -> dict[str, Any]:
     manifest.input_frames_dir.mkdir(parents=True, exist_ok=True)
     manifest.output_frames_dir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +222,9 @@ def run_worker(manifest: InputManifest) -> dict[str, Any]:
     elif backend_name in {"realbasicvsr", "realbasicvsr-bridge"}:
         output_frames, backend_meta = _run_realbasicvsr(manifest)
         mode = "realbasicvsr"
+    elif backend_name in {"seedvr-teacher", "seedvr_teacher"}:
+        output_frames, backend_meta = _run_seedvr_teacher(manifest)
+        mode = "seedvr-teacher"
     else:
         raise ValueError(f"unsupported worker backend `{manifest.backend}`")
 

@@ -388,7 +388,7 @@ impl PipelineOrchestrator {
                         &decoded.frames_dir,
                         decoded.frame_count,
                         &manifest.window_tiles,
-                        backend.name(),
+                        backend.kind(),
                     );
                     let worker_result = backend.worker_adapter().run(worker_launch)?;
 
@@ -445,7 +445,7 @@ impl PipelineOrchestrator {
                             &decoded.frames_dir,
                             decoded.frame_count,
                             &failed_tile_jobs,
-                            backend.name(),
+                            backend.kind(),
                         );
                         let worker_result = backend.worker_adapter().run(worker_launch)?;
                         decoded.frames_dir = worker_result.output_frames_dir;
