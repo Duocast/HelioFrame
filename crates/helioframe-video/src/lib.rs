@@ -4,7 +4,10 @@ pub mod probe;
 pub mod stitch;
 
 pub use decoder::{decode_to_frame_directory, DecodePlan, DecodedFrames};
-pub use encoder::{encode_from_frame_directory, EncodePlan, EncodeResult};
+pub use encoder::{
+    auto_detect_codec, encode_from_frame_directory, select_best_codec, EncodePlan, EncodeResult,
+    NvencPreset, VideoCodec,
+};
 pub use probe::{probe_input, VideoProbe};
 pub use stitch::{stitch_tiles, FrameTile, StitchPlan, StitchResult};
 
@@ -16,6 +19,7 @@ mod tests {
 
     use crate::{
         decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
+        NvencPreset, VideoCodec,
     };
 
     #[test]
@@ -56,6 +60,11 @@ mod tests {
             enable_mild_denoise: false,
             resize_filter: "lanczos",
             sharpen_amount: None,
+            codec: Some(VideoCodec::H264),
+            nvenc_preset: NvencPreset::default(),
+            quality: None,
+            gpu_index: None,
+            allow_10bit: false,
         };
 
         let encoded =
