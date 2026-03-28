@@ -172,6 +172,7 @@ fn run_encode(
 
     let mut command = Command::new("ffmpeg");
     command
+        .env("LC_ALL", "C")
         .arg("-y")
         .arg("-v")
         .arg("error")

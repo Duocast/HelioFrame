@@ -103,6 +103,7 @@ pub fn decode_to_frame_directory(
 
 fn ffprobe_frame_timestamps(input: &Path) -> HelioFrameResult<Vec<f64>> {
     let output = Command::new("ffprobe")
+        .env("LC_ALL", "C")
         .arg("-v")
         .arg("error")
         .arg("-select_streams")
@@ -126,7 +127,7 @@ fn ffprobe_frame_timestamps(input: &Path) -> HelioFrameResult<Vec<f64>> {
     let mut timestamps = Vec::new();
 
     for line in stdout.lines() {
-        let value = line.trim();
+        let value = line.trim().trim_end_matches(',');
         if value.is_empty() || value == "N/A" {
             continue;
         }
