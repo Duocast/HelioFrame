@@ -6,8 +6,11 @@ use std::{
 
 use helioframe_core::{
     AppConfig, HelioFrameResult, PresetConfig, RunLayout, RunManifest, RunProbeInfo,
+    TemporalQcManifest, TemporalQcSummary, TemporalQcWindowStatus, WindowTileManifest,
 };
-use helioframe_model::{BackendRegistry, InferencePlan, WorkerLaunchConfig};
+use helioframe_model::{
+    BackendRegistry, InferencePlan, RerunPolicy, TemporalQcPolicy, WorkerLaunchConfig,
+};
 use helioframe_video::{
     decode_to_frame_directory, encode_from_frame_directory, probe_input, DecodePlan, EncodePlan,
     VideoProbe,
@@ -15,11 +18,13 @@ use helioframe_video::{
 
 use crate::shots::{detect_shots, DEFAULT_SCDET_THRESHOLD};
 use crate::stages::PipelineStage;
+use crate::temporal_qc::evaluate_windows;
 use crate::tiling::build_window_tile_manifests;
 use crate::windows::build_windows_and_batches;
 
 const WINDOWS_ARTIFACT_FILENAME: &str = "windows.json";
 const ANCHORS_ARTIFACT_FILENAME: &str = "anchors.json";
+const TEMPORAL_QC_ARTIFACT_FILENAME: &str = "temporal_qc.json";
 
 #[derive(Debug, serde::Serialize)]
 struct ProbeArtifact {
@@ -73,6 +78,36 @@ impl PipelineOrchestrator {
         })?;
 
         Ok(())
+    }
+
+    fn build_temporal_qc_manifest(
+        report: &crate::temporal_qc::TemporalQcReport,
+    ) -> TemporalQcManifest {
+        let windows = report
+            .windows
+            .iter()
+            .map(|window| TemporalQcWindowStatus {
+                window_index: window.window_index,
+                start_frame: window.start_frame,
+                end_frame_exclusive: window.end_frame_exclusive,
+                flicker_score: window.flicker_score,
+                ghosting_score: window.ghosting_score,
+                instability_score: window.instability_score,
+                unstable: window.unstable,
+                rerun_scheduled: report.rerun_window_indices.contains(&window.window_index),
+                reasons: window.reasons.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        TemporalQcManifest {
+            summary: TemporalQcSummary {
+                total_windows: windows.len(),
+                unstable_windows: report.unstable_window_indices.len(),
+                rerun_scheduled_windows: report.rerun_window_indices.len(),
+                reject_run: report.should_reject_run,
+            },
+            windows,
+        }
     }
 
     pub fn plan(config: &AppConfig, preset: PresetConfig) -> HelioFrameResult<ExecutionPlan> {
@@ -210,6 +245,7 @@ impl PipelineOrchestrator {
         let mut decoded_frames = None;
         let mut shot_detection = None;
         let mut temporal_windows = None;
+        let mut temporal_window_tiles: Option<Vec<WindowTileManifest>> = None;
 
         for stage in &plan.stages {
             match stage.name {
@@ -335,6 +371,7 @@ impl PipelineOrchestrator {
                         &tile_manifests,
                         "tile manifest",
                     )?;
+                    temporal_window_tiles = Some(tile_manifests.clone());
                     manifest.set_window_tiles(tile_manifests);
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
@@ -357,6 +394,73 @@ impl PipelineOrchestrator {
 
                     decoded.frames_dir = worker_result.output_frames_dir.clone();
                     decoded.frame_count = worker_result.frame_count;
+                    manifest.append_stage_timing(stage.name, started.elapsed());
+                }
+                "temporal-qc" => {
+                    let started = Instant::now();
+                    let windows = temporal_windows.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "temporal-qc stage cannot run before window stage".to_string(),
+                        )
+                    })?;
+                    let tiles = temporal_window_tiles.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "temporal-qc stage cannot run before tile stage".to_string(),
+                        )
+                    })?;
+
+                    let qc_policy = TemporalQcPolicy {
+                        enabled: plan.preset.enable_temporal_consistency_checks,
+                        reject_if_unstable: plan.preset.reject_on_temporal_regression,
+                        ..TemporalQcPolicy::default()
+                    };
+                    let qc_report = evaluate_windows(windows, tiles, &qc_policy);
+
+                    Self::write_stage_artifact(
+                        &run_layout,
+                        TEMPORAL_QC_ARTIFACT_FILENAME,
+                        &qc_report,
+                        "temporal qc",
+                    )?;
+
+                    manifest.set_temporal_qc(Self::build_temporal_qc_manifest(&qc_report));
+
+                    if let RerunPolicy::FailedWindows { max_attempts } = qc_policy.rerun_policy {
+                        if max_attempts > 0 && !qc_report.rerun_window_indices.is_empty() {
+                            let decoded = decoded_frames.as_mut().ok_or_else(|| {
+                                helioframe_core::HelioFrameError::Config(
+                                    "temporal-qc rerun requires decoded frames".to_string(),
+                                )
+                            })?;
+                            let failed_tile_jobs = tiles
+                                .iter()
+                                .filter(|tile| {
+                                    qc_report.rerun_window_indices.contains(&tile.window_index)
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+
+                            let worker_launch = WorkerLaunchConfig::new(
+                                &run_layout,
+                                &manifest,
+                                &decoded.frames_dir,
+                                decoded.frame_count,
+                                &failed_tile_jobs,
+                                backend.name(),
+                            );
+                            let worker_result = backend.worker_adapter().run(worker_launch)?;
+                            decoded.frames_dir = worker_result.output_frames_dir;
+                            decoded.frame_count = worker_result.frame_count;
+                        }
+                    }
+
+                    if qc_report.should_reject_run {
+                        return Err(helioframe_core::HelioFrameError::Config(format!(
+                            "temporal QC rejected run: {} unstable windows detected",
+                            qc_report.unstable_window_indices.len()
+                        )));
+                    }
+
                     manifest.append_stage_timing(stage.name, started.elapsed());
                 }
                 "encode" => {
@@ -470,6 +574,7 @@ mod tests {
         assert!(manifest.stage_timings.len() >= execution.plan.stages.len());
         assert!(!manifest.windows.is_empty());
         assert!(!manifest.window_tiles.is_empty());
+        assert!(manifest.temporal_qc.is_some());
         assert_eq!(manifest.windows[0].start_frame, 0);
         assert!(!manifest.windows[0].anchor_frames.is_empty());
         assert!(!manifest.window_tiles[0].tiles.is_empty());
@@ -502,6 +607,11 @@ mod tests {
             .run_layout
             .intermediate_artifacts_dir
             .join("window_batches.json")
+            .exists());
+        assert!(execution
+            .run_layout
+            .intermediate_artifacts_dir
+            .join(TEMPORAL_QC_ARTIFACT_FILENAME)
             .exists());
 
         let windows_raw = std::fs::read_to_string(
