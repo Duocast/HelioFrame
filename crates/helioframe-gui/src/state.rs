@@ -10,6 +10,7 @@ pub enum ActivePanel {
     Progress,
     Diagnostics,
     Settings,
+    About,
 }
 
 /// Pipeline execution status.
@@ -149,7 +150,6 @@ pub struct AppState {
     pub log_level: String,
 
     // UI state
-    pub show_about: bool,
     pub file_drop_hover: bool,
 }
 
@@ -169,7 +169,6 @@ impl Default for AppState {
             run_directory: ".helioframe".into(),
             auto_open_output: false,
             log_level: "info".into(),
-            show_about: false,
             file_drop_hover: false,
         }
     }

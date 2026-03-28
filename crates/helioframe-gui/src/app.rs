@@ -1,6 +1,6 @@
-use egui::{CornerRadius, Panel, RichText, Stroke, Ui};
+use egui::{Panel, Stroke, Ui};
 
-use crate::panels::{diagnostics, progress, settings, sidebar, upscale};
+use crate::panels::{about, diagnostics, progress, settings, sidebar, upscale};
 use crate::state::{ActivePanel, AppState};
 use crate::theme::{self, Palette};
 
@@ -11,6 +11,7 @@ pub struct HelioFrameApp {
 impl HelioFrameApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply_theme(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         Self {
             state: AppState::default(),
         }
@@ -26,11 +27,6 @@ impl eframe::App for HelioFrameApp {
 
         // Handle file drops
         handle_file_drops(&ctx, &mut self.state);
-
-        // About dialog
-        if self.state.show_about {
-            draw_about_window(&ctx, &mut self.state);
-        }
 
         // Drop zone overlay
         if self.state.file_drop_hover {
@@ -67,6 +63,7 @@ impl eframe::App for HelioFrameApp {
                         diagnostics::draw_diagnostics_panel(ui, &mut self.state)
                     }
                     ActivePanel::Settings => settings::draw_settings_panel(ui, &mut self.state),
+                    ActivePanel::About => about::draw_about_panel(ui, &mut self.state),
                 }
             });
     }
@@ -131,65 +128,4 @@ fn handle_file_drops(ctx: &egui::Context, state: &mut AppState) {
             }
         }
     }
-}
-
-fn draw_about_window(ctx: &egui::Context, state: &mut AppState) {
-    egui::Window::new("About HelioFrame")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([400.0, 280.0])
-        .frame(
-            egui::Frame::new()
-                .fill(Palette::BG_DARK)
-                .stroke(Stroke::new(1.0, Palette::BORDER))
-                .corner_radius(CornerRadius::same(12))
-                .inner_margin(24.0),
-        )
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new("HelioFrame")
-                        .size(28.0)
-                        .color(Palette::ACCENT)
-                        .strong(),
-                );
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("Quality-First 4K Video Upscaler")
-                        .size(14.0)
-                        .color(Palette::TEXT_SECONDARY),
-                );
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new("v0.1.0")
-                        .size(13.0)
-                        .color(Palette::TEXT_MUTED)
-                        .family(egui::FontFamily::Monospace),
-                );
-                ui.add_space(16.0);
-                ui.label(
-                    RichText::new(
-                        "Intelligent video upscaling to 3840\u{00D7}2160 with \
-                         perceptual richness, temporal stability, and structural fidelity.",
-                    )
-                    .size(12.0)
-                    .color(Palette::TEXT_SECONDARY),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("Rust + ONNX Runtime + FFmpeg")
-                        .size(11.0)
-                        .color(Palette::TEXT_MUTED)
-                        .family(egui::FontFamily::Monospace),
-                );
-                ui.add_space(16.0);
-                if ui
-                    .button(RichText::new("Close").color(Palette::TEXT_PRIMARY))
-                    .clicked()
-                {
-                    state.show_about = false;
-                }
-            });
-        });
 }
