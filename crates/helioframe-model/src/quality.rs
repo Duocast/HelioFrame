@@ -78,6 +78,11 @@ pub struct DetailRefinementPolicy {
     /// the refiner considers it a candidate.  Keeps the refiner away from
     /// smooth gradients and sky regions.
     pub hf_energy_threshold: f64,
+    /// Minimum fraction (0.0–1.0) of patches in a temporal window that must
+    /// qualify as high-frequency before the window is sent to the refiner.
+    /// Windows below this ratio are skipped entirely, saving compute and
+    /// avoiding unnecessary sparkle risk on predominantly smooth content.
+    pub min_window_hf_ratio: f64,
     /// Temporal sparkle guard — if refined output exceeds these limits the
     /// window is rolled back to pre-refinement frames.
     pub sparkle_guard: SparkleGuardThresholds,
@@ -96,6 +101,7 @@ impl Default for DetailRefinementPolicy {
             enabled: true,
             categories: DetailCategory::studio_defaults(),
             hf_energy_threshold: 0.25,
+            min_window_hf_ratio: 0.10,
             sparkle_guard: SparkleGuardThresholds::default(),
             refinement_steps: 6,
             refinement_strength: 0.4,

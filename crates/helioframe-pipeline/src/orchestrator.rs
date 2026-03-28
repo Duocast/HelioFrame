@@ -405,6 +405,11 @@ impl PipelineOrchestrator {
                             "refine stage cannot run before decode stage".to_string(),
                         )
                     })?;
+                    let windows = temporal_windows.as_ref().ok_or_else(|| {
+                        helioframe_core::HelioFrameError::Config(
+                            "refine stage cannot run before window stage".to_string(),
+                        )
+                    })?;
 
                     let detail_policy = DetailRefinementPolicy::default();
                     let refiner_options = serde_json::json!({
@@ -415,6 +420,7 @@ impl PipelineOrchestrator {
                         "refinement_steps": detail_policy.refinement_steps,
                         "refinement_strength": detail_policy.refinement_strength,
                         "hf_energy_threshold": detail_policy.hf_energy_threshold,
+                        "min_window_hf_ratio": detail_policy.min_window_hf_ratio,
                         "max_hf_flicker": detail_policy.sparkle_guard.max_hf_flicker,
                         "max_patch_shimmer": detail_policy.sparkle_guard.max_patch_shimmer,
                         "categories": detail_policy.categories.iter()
@@ -423,6 +429,21 @@ impl PipelineOrchestrator {
                         "patch_size": 128,
                         "precision": if plan.preset.use_half_precision { "fp16" } else { "fp32" },
                     });
+
+                    // Serialize temporal windows so the refiner can process
+                    // each window independently and apply per-window sparkle
+                    // guard and HF pre-screening.
+                    let window_ranges: Vec<serde_json::Value> = windows
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, w)| {
+                            serde_json::json!({
+                                "window_index": idx,
+                                "start_frame": w.start_frame,
+                                "end_frame_exclusive": w.end_frame_exclusive,
+                            })
+                        })
+                        .collect();
 
                     let refine_worker_io_dir = run_layout
                         .intermediate_artifacts_dir
@@ -453,6 +474,7 @@ impl PipelineOrchestrator {
                         "clip_id": "detail-refine-job",
                         "backend": "detail-refiner",
                         "backend_options": refiner_options,
+                        "windows": window_ranges,
                         "input_frames_dir": decoded.frames_dir.to_string_lossy(),
                         "output_frames_dir": refine_output_frames_dir.to_string_lossy(),
                         "output_manifest_path": refine_output_manifest_path.to_string_lossy(),
