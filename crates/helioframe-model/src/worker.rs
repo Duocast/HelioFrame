@@ -10,6 +10,19 @@ use helioframe_core::{BackendKind, RunLayout, RunManifest, WindowTileManifest};
 const INPUT_SCHEMA_VERSION: &str = "1.0.0";
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Returns the platform-appropriate Python executable name.
+///
+/// On Windows the standard Python 3 executable is `python` (the `python3`
+/// name either does not exist or points to a Microsoft Store stub that exits
+/// immediately).  On other platforms `python3` is the conventional name.
+pub fn python_exe() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum WorkerAdapter {
     PythonProcess,
@@ -124,7 +137,7 @@ fn run_python_worker(
         ))
     })?;
 
-    let mut child = Command::new("python3")
+    let mut child = Command::new(python_exe())
         .arg("workers/python/worker.py")
         .arg(&input_manifest_path)
         .spawn()

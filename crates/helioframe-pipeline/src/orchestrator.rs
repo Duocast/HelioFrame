@@ -494,7 +494,7 @@ impl PipelineOrchestrator {
                         ))
                     })?;
 
-                    let mut child = std::process::Command::new("python3")
+                    let mut child = std::process::Command::new(helioframe_model::python_exe())
                         .arg("workers/python/worker.py")
                         .arg(&refine_input_manifest_path)
                         .spawn()
@@ -998,7 +998,7 @@ impl PipelineOrchestrator {
                         ))
                     })?;
 
-                    let mut child = std::process::Command::new("python3")
+                    let mut child = std::process::Command::new(helioframe_model::python_exe())
                         .arg("workers/python/worker.py")
                         .arg(&refine_input_manifest_path)
                         .spawn()
