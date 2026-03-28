@@ -13,6 +13,7 @@ const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 #[derive(Debug, Clone, Copy)]
 pub enum WorkerAdapter {
     PythonProcess,
+    OnnxRuntime,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +90,7 @@ impl WorkerAdapter {
     ) -> helioframe_core::HelioFrameResult<WorkerRunResult> {
         match self {
             Self::PythonProcess => run_python_worker(config),
+            Self::OnnxRuntime => crate::onnx::run_onnx_inference(&config, None),
         }
     }
 }

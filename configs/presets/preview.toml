@@ -12,4 +12,4 @@ enable_detail_refiner = false
 enable_temporal_consistency_checks = false
 reject_on_temporal_regression = false
 anchor_frame_stride = 2
-notes = "Fast approximate output for quick look review, not final delivery."
+notes = "Fast approximate output for quick look review via ONNX Runtime. Runs entirely in Rust without the Python worker."

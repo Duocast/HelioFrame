@@ -3,6 +3,7 @@ use helioframe_core::{BackendKind, Resolution};
 use crate::{
     plan::{ExecutionHints, InferencePlan},
     traits::{BackendExecutionProfile, InferenceBackend},
+    worker::WorkerAdapter,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +117,7 @@ impl InferenceBackend for FastPreview {
         InferencePlan {
             backend: self.kind(),
             target_resolution,
-            summary: "Distilled preview backend intended for quick turnaround and approximate visual review before committing to a studio render.".into(),
+            summary: "ONNX Runtime-backed distilled preview for quick turnaround without the Python worker.".into(),
             hints: ExecutionHints {
                 patch_wise_4k: target_resolution.width >= 3840,
                 multi_step_diffusion: false,
@@ -124,11 +125,15 @@ impl InferenceBackend for FastPreview {
                 detail_refiner: false,
                 temporal_qc_gate: false,
                 teacher_guided: false,
-                custom_kernels_recommended: true,
+                custom_kernels_recommended: false,
                 temporal_window_inference: false,
                 bridge_backend_label: None,
             },
         }
+    }
+
+    fn worker_adapter(&self) -> WorkerAdapter {
+        WorkerAdapter::OnnxRuntime
     }
 }
 

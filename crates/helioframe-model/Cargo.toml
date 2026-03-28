@@ -8,3 +8,7 @@ license.workspace = true
 helioframe-core = { path = "../helioframe-core" }
 serde.workspace = true
 serde_json.workspace = true
+ort.workspace = true
+image.workspace = true
+ndarray.workspace = true
+tracing.workspace = true
