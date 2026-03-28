@@ -90,13 +90,7 @@ pub fn draw_about_panel(ui: &mut egui::Ui, _state: &mut AppState) {
                         }
                     });
 
-                ui.add_space(16.0);
 
-                ui.label(
-                    RichText::new("Licensed under MIT")
-                        .size(11.0)
-                        .color(Palette::TEXT_MUTED),
-                );
             });
         });
 }

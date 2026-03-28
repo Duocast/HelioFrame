@@ -90,7 +90,7 @@ pub fn draw_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
                 .size(11.0)
                 .color(Palette::TEXT_MUTED),
         );
-        if ui
+        let about_response = ui
             .add(
                 egui::Label::new(
                     RichText::new("About")
@@ -98,9 +98,11 @@ pub fn draw_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
                         .color(Palette::TEXT_SECONDARY),
                 )
                 .sense(egui::Sense::click()),
-            )
-            .clicked()
-        {
+            );
+        if about_response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if about_response.clicked() {
             state.active_panel = ActivePanel::About;
         }
     });
