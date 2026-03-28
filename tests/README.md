@@ -19,3 +19,21 @@ cargo test -p helioframe-video --test io_regression
 ```
 
 The test harness lives in `crates/helioframe-video/tests/io_regression.rs`.
+
+## Benchmark and visual QA harness
+
+Run:
+
+```bash
+scripts/benchmark.sh
+```
+
+The benchmark harness:
+
+- executes multiple backends against the same clip-set manifest,
+- stores each backend run in benchmark-local run directories,
+- writes side-by-side review videos for visual QA,
+- emits a machine-readable `metrics.json` summary.
+
+Default clip categories are declared in `tests/fixtures/benchmark_clips.json`
+(`synthetic`, `real-world`, `torture`).
