@@ -60,6 +60,10 @@ pub struct RunManifest {
     pub window_tiles: Vec<WindowTileManifest>,
     pub temporal_qc: Option<TemporalQcManifest>,
     pub stage_timings: Vec<StageTiming>,
+    #[serde(default)]
+    pub completed_stages: Vec<String>,
+    #[serde(default)]
+    pub completed_windows: Vec<usize>,
 }
 
 impl RunManifest {
@@ -78,6 +82,8 @@ impl RunManifest {
                 stage: "preset".into(),
                 elapsed_ms: 0,
             }],
+            completed_stages: Vec::new(),
+            completed_windows: Vec::new(),
         }
     }
 
@@ -98,6 +104,33 @@ impl RunManifest {
             stage: stage.into(),
             elapsed_ms: elapsed.as_millis(),
         });
+    }
+
+    pub fn mark_stage_completed(&mut self, stage: &str) {
+        let name = stage.to_string();
+        if !self.completed_stages.contains(&name) {
+            self.completed_stages.push(name);
+        }
+    }
+
+    pub fn is_stage_completed(&self, stage: &str) -> bool {
+        self.completed_stages.iter().any(|s| s == stage)
+    }
+
+    pub fn mark_window_completed(&mut self, window_index: usize) {
+        if !self.completed_windows.contains(&window_index) {
+            self.completed_windows.push(window_index);
+        }
+    }
+
+    pub fn is_window_completed(&self, window_index: usize) -> bool {
+        self.completed_windows.contains(&window_index)
+    }
+
+    pub fn pending_window_indices(&self) -> Vec<usize> {
+        (0..self.windows.len())
+            .filter(|idx| !self.completed_windows.contains(idx))
+            .collect()
     }
 }
 
@@ -157,6 +190,50 @@ impl RunLayout {
         })
     }
 
+    pub fn from_existing(run_dir: impl AsRef<Path>) -> HelioFrameResult<Self> {
+        let run_dir = run_dir.as_ref().to_path_buf();
+        if !run_dir.exists() {
+            return Err(HelioFrameError::RunManifest(format!(
+                "run directory does not exist: {}",
+                run_dir.display()
+            )));
+        }
+        let manifest_path = run_dir.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(HelioFrameError::RunManifest(format!(
+                "manifest not found in run directory: {}",
+                manifest_path.display()
+            )));
+        }
+        let run_id = run_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let artifacts_dir = run_dir.join("artifacts");
+        Ok(Self {
+            run_id,
+            run_dir: run_dir.clone(),
+            artifacts_dir: artifacts_dir.clone(),
+            input_artifacts_dir: artifacts_dir.join("input"),
+            intermediate_artifacts_dir: artifacts_dir.join("intermediate"),
+            output_artifacts_dir: artifacts_dir.join("output"),
+            manifest_path,
+        })
+    }
+
+    pub fn load_manifest(&self) -> HelioFrameResult<RunManifest> {
+        let raw = fs::read_to_string(&self.manifest_path).map_err(|err| {
+            HelioFrameError::RunManifest(format!(
+                "failed to read manifest from {}: {err}",
+                self.manifest_path.display()
+            ))
+        })?;
+        serde_json::from_str(&raw).map_err(|err| {
+            HelioFrameError::RunManifest(format!("failed to parse manifest: {err}"))
+        })
+    }
+
     pub fn write_manifest(&self, manifest: &RunManifest) -> HelioFrameResult<()> {
         let json = serde_json::to_string_pretty(manifest).map_err(|err| {
             HelioFrameError::RunManifest(format!("failed to serialize run manifest: {err}"))
@@ -202,6 +279,166 @@ mod tests {
         assert!(layout.input_artifacts_dir.exists());
         assert!(layout.intermediate_artifacts_dir.exists());
         assert!(layout.output_artifacts_dir.exists());
+
+        fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
+    }
+
+    fn make_test_config() -> AppConfig {
+        AppConfig {
+            input: "input.mp4".into(),
+            output: "output.mp4".into(),
+            backend: BackendKind::StcditStudio,
+            preset: UpscalePreset::Studio,
+            target_resolution: crate::Resolution::UHD_4K,
+        }
+    }
+
+    fn make_test_manifest(run_id: &str) -> RunManifest {
+        let config = make_test_config();
+        let probe = RunProbeInfo {
+            container: "mp4".into(),
+            assumed_resolution: "1920x1080".into(),
+        };
+        RunManifest::new(run_id.to_string(), &config, probe)
+    }
+
+    #[test]
+    fn mark_stage_completed_tracks_stages() {
+        let mut manifest = make_test_manifest("test-run-1");
+        assert!(!manifest.is_stage_completed("probe"));
+
+        manifest.mark_stage_completed("probe");
+        assert!(manifest.is_stage_completed("probe"));
+        assert!(!manifest.is_stage_completed("decode"));
+
+        // Duplicate marking is idempotent.
+        manifest.mark_stage_completed("probe");
+        assert_eq!(
+            manifest
+                .completed_stages
+                .iter()
+                .filter(|s| s.as_str() == "probe")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn mark_window_completed_tracks_windows() {
+        let mut manifest = make_test_manifest("test-run-2");
+        assert!(!manifest.is_window_completed(0));
+
+        manifest.mark_window_completed(0);
+        manifest.mark_window_completed(2);
+        assert!(manifest.is_window_completed(0));
+        assert!(!manifest.is_window_completed(1));
+        assert!(manifest.is_window_completed(2));
+
+        // Duplicate is idempotent.
+        manifest.mark_window_completed(0);
+        assert_eq!(
+            manifest
+                .completed_windows
+                .iter()
+                .filter(|&&w| w == 0)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn pending_window_indices_filters_completed() {
+        let mut manifest = make_test_manifest("test-run-3");
+        manifest.set_windows(vec![
+            crate::TemporalWindow {
+                start_frame: 0,
+                end_frame_exclusive: 20,
+                anchor_frames: vec![0],
+            },
+            crate::TemporalWindow {
+                start_frame: 20,
+                end_frame_exclusive: 40,
+                anchor_frames: vec![20],
+            },
+            crate::TemporalWindow {
+                start_frame: 40,
+                end_frame_exclusive: 60,
+                anchor_frames: vec![40],
+            },
+        ]);
+
+        manifest.mark_window_completed(0);
+        manifest.mark_window_completed(2);
+
+        let pending = manifest.pending_window_indices();
+        assert_eq!(pending, vec![1]);
+    }
+
+    #[test]
+    fn from_existing_loads_previously_created_layout() {
+        let temp = std::env::temp_dir().join(format!(
+            "helioframe-resume-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+
+        let layout = RunLayout::create(&temp).expect("run layout should be created");
+        let mut manifest = make_test_manifest(&layout.run_id);
+        manifest.mark_stage_completed("probe");
+        manifest.mark_stage_completed("decode");
+        manifest.mark_window_completed(0);
+        layout
+            .write_manifest(&manifest)
+            .expect("write should succeed");
+
+        // Reopen the same run directory.
+        let resumed = RunLayout::from_existing(&layout.run_dir).expect("from_existing should work");
+        assert_eq!(resumed.run_id, layout.run_id);
+
+        let loaded = resumed.load_manifest().expect("load should succeed");
+        assert!(loaded.is_stage_completed("probe"));
+        assert!(loaded.is_stage_completed("decode"));
+        assert!(!loaded.is_stage_completed("window"));
+        assert!(loaded.is_window_completed(0));
+        assert!(!loaded.is_window_completed(1));
+
+        fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
+    }
+
+    #[test]
+    fn completed_stages_default_for_old_manifests() {
+        // Simulate a manifest written before resume support was added
+        // (missing completed_stages / completed_windows fields).
+        let temp = std::env::temp_dir().join(format!(
+            "helioframe-compat-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+
+        let layout = RunLayout::create(&temp).expect("run layout should be created");
+
+        // Write a manifest JSON without the new fields.
+        let json = serde_json::json!({
+            "run_id": layout.run_id,
+            "input": "input.mp4",
+            "output": "output.mp4",
+            "preset": "studio",
+            "backend": "stcdit-studio",
+            "probe": { "container": "mp4", "assumed_resolution": "1920x1080" },
+            "windows": [],
+            "window_tiles": [],
+            "temporal_qc": null,
+            "stage_timings": []
+        });
+        fs::write(&layout.manifest_path, json.to_string()).expect("write should succeed");
+
+        let loaded = layout.load_manifest().expect("should parse without new fields");
+        assert!(loaded.completed_stages.is_empty());
+        assert!(loaded.completed_windows.is_empty());
 
         fs::remove_dir_all(temp).expect("temp directory cleanup should succeed");
     }
