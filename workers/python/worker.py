@@ -299,6 +299,106 @@ def _run_stcdit_studio(manifest: InputManifest) -> tuple[list[dict[str, Any]], d
     return output_frames, backend_meta
 
 
+def _run_helioframe_master(manifest: InputManifest) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    options = manifest.backend_options
+
+    # Teacher sub-backend options
+    teacher_model_path = Path(
+        options.get("teacher_model_path", "models/seedvr-teacher/seedvr_teacher_v1.0.0.ts")
+    )
+    if not teacher_model_path.is_absolute():
+        teacher_model_path = Path.cwd() / teacher_model_path
+
+    # Studio sub-backend options
+    studio_model_path = Path(
+        options.get("studio_model_path", "models/stcdit-studio/stcdit_studio_v1.0.0.ts")
+    )
+    if not studio_model_path.is_absolute():
+        studio_model_path = Path.cwd() / studio_model_path
+
+    # Refiner sub-backend options
+    refiner_model_path = Path(
+        options.get("refiner_model_path", "models/detail-refiner/detail_refiner_v1.0.0.ts")
+    )
+    if not refiner_model_path.is_absolute():
+        refiner_model_path = Path.cwd() / refiner_model_path
+
+    from backends import HelioFrameMasterBackend
+
+    backend = HelioFrameMasterBackend(
+        # Teacher
+        teacher_model_path=teacher_model_path,
+        teacher_model_version=str(
+            options.get("teacher_model_version", "seedvr-teacher-v1.0.0")
+        ),
+        teacher_weights_sha256=str(
+            options.get(
+                "teacher_weights_sha256",
+                "c2c0d9ec5b0c8c1f8b03419e7f3e462f8ab7604f53f6ed15ec5122f7e14b8079",
+            )
+        ),
+        teacher_device=str(options.get("device", "cuda")),
+        teacher_window_size=int(options.get("teacher_window_size", 12)),
+        teacher_overlap=int(options.get("teacher_overlap", 4)),
+        teacher_precision=str(options.get("teacher_precision", "fp32")),
+        # Studio
+        studio_model_path=studio_model_path,
+        studio_model_version=str(
+            options.get("studio_model_version", "stcdit-studio-v1.0.0")
+        ),
+        studio_weights_sha256=str(
+            options.get(
+                "studio_weights_sha256",
+                "a7b3e1f0c4d29856e1a0f3b7c8d5e2a9f6b4c1d8e5a2f7b3c0d6e9a1f4b8c5d2",
+            )
+        ),
+        studio_device=str(options.get("device", "cuda")),
+        studio_window_size=int(options.get("studio_window_size", 20)),
+        studio_overlap=int(options.get("studio_overlap", 4)),
+        studio_precision=str(options.get("studio_precision", "fp16")),
+        studio_diffusion_steps=int(options.get("diffusion_steps", 24)),
+        studio_guidance_scale=float(options.get("guidance_scale", 7.5)),
+        studio_anchor_frame_stride=int(options.get("anchor_frame_stride", 3)),
+        # Refiner
+        refiner_model_path=refiner_model_path,
+        refiner_model_version=str(
+            options.get("refiner_model_version", "detail-refiner-v1.0.0")
+        ),
+        refiner_weights_sha256=str(
+            options.get(
+                "refiner_weights_sha256",
+                "b8d4f2a1e6c73950d2b1e4a8f7c3d6b9e5a2f8c1d7b4e0a3f6c9d2b5e8a1f4c7",
+            )
+        ),
+        refiner_device=str(options.get("device", "cuda")),
+        refiner_refinement_steps=int(options.get("refiner_refinement_steps", 6)),
+        refiner_refinement_strength=float(options.get("refiner_refinement_strength", 0.4)),
+        refiner_hf_energy_threshold=float(options.get("refiner_hf_energy_threshold", 0.25)),
+        refiner_min_window_hf_ratio=float(options.get("refiner_min_window_hf_ratio", 0.10)),
+        refiner_max_hf_flicker=float(options.get("refiner_max_hf_flicker", 0.12)),
+        refiner_max_patch_shimmer=float(options.get("refiner_max_patch_shimmer", 0.08)),
+        refiner_categories=options.get("refiner_categories"),
+        refiner_patch_size=int(options.get("refiner_patch_size", 128)),
+        refiner_precision=str(options.get("refiner_precision", "fp16")),
+        # QC
+        max_qc_reruns=int(options.get("max_qc_reruns", 2)),
+        qc_max_flicker=float(options.get("qc_max_flicker", 0.12)),
+        qc_max_shimmer=float(options.get("qc_max_shimmer", 0.08)),
+    )
+
+    written, backend_meta = backend.run(manifest, sha256_fn=_sha256)
+    output_frames = [
+        {
+            "index": frame.index,
+            "file_name": frame.file_name,
+            "source_sha256": frame.source_sha256,
+            "output_sha256": frame.output_sha256,
+        }
+        for frame in written
+    ]
+    return output_frames, backend_meta
+
+
 def run_worker(manifest: InputManifest) -> dict[str, Any]:
     manifest.input_frames_dir.mkdir(parents=True, exist_ok=True)
     manifest.output_frames_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +419,9 @@ def run_worker(manifest: InputManifest) -> dict[str, Any]:
     elif backend_name in {"detail-refiner", "detail_refiner"}:
         output_frames, backend_meta = _run_detail_refiner(manifest)
         mode = "detail-refiner"
+    elif backend_name in {"helioframe-master", "helioframe_master"}:
+        output_frames, backend_meta = _run_helioframe_master(manifest)
+        mode = "helioframe-master"
     else:
         raise ValueError(f"unsupported worker backend `{manifest.backend}`")
 
